@@ -1,7 +1,7 @@
 // Registry of demos shown on the hub. status: 'ready' | 'soon'.
 // `face` is a cast id used for the card art.
 export const DEMOS = [
-  { slug: 'league-deck', title: 'Touchline', tag: 'Your idea · deck → live sim', face: 'kenji', status: 'soon', star: true,
+  { slug: 'league-deck', title: 'Touchline', tag: 'Your idea · deck → live sim', face: 'kenji', status: 'ready', star: true,
     pitch: 'Build a tactics deck. Each 15 minutes you play cards, then watch the match simulate. Beat the legendary coach of each league.' },
   { slug: 'grid-tactics', title: 'Grid Tactics', tag: 'Into the Breach × football', face: 'tomo', status: 'soon',
     pitch: 'Move every player on an 11×7 grid, then pass, shoot or tackle.' },

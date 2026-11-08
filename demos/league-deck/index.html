@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111830">
+<title>Touchline · Pitch Lab</title>
+<link rel="stylesheet" href="../../shared/ui.css">
+<style>
+  .screen { display: flex; flex-direction: column; gap: 10px; }
+  .logo { font-family: var(--font-h); font-size: 46px; color: var(--sun); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; text-shadow: 0 5px 0 var(--ink); text-align: center; line-height: 1; margin-top: 4px; }
+  .sublogo { text-align: center; font-size: 13px; opacity: .8; margin-top: -2px; }
+  h2.sec { font-size: 20px; margin: 6px 2px 0; }
+
+  /* coach + league pickers */
+  .coaches { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; scrollbar-width: none; }
+  .coach { flex: none; width: 104px; text-align: center; cursor: pointer; padding: 6px; }
+  .coach img { width: 84px; height: 84px; border-radius: 10px; border: 3px solid var(--ink); display: block; margin: 0 auto 4px; }
+  .coach b { font-family: var(--font-h); font-weight: 400; font-size: 14px; display: block; line-height: 1.1; }
+  .coach span { font-size: 10.5px; opacity: .7; }
+  .coach.sel { outline: 4px solid var(--sun); transform: translateY(-3px); }
+  .coach.locked img { filter: brightness(0) opacity(.45); }
+  .coach.locked { opacity: .75; }
+  .coachinfo { font-size: 13px; }
+  .league { display: flex; gap: 10px; align-items: center; cursor: pointer; transition: transform .1s; }
+  .league:hover { transform: translateY(-2px); }
+  .league .flag { font-size: 30px; }
+  .league h3 { font-size: 19px; }
+  .league p { margin: 2px 0 0; font-size: 12.5px; }
+  .league .boss img { width: 54px; height: 54px; border-radius: 10px; border: 3px solid var(--ink); }
+  .league.done { background: linear-gradient(120deg, var(--paper) 60%, #c8f5c0); }
+  .league.locked { opacity: .55; pointer-events: none; }
+  .stylechip { font-size: 11px; padding: 1px 7px; border-radius: 99px; border: 2px solid var(--ink); font-family: var(--font-h); color: var(--ink); }
+
+  /* ladder */
+  .ladder { display: flex; flex-direction: column-reverse; gap: 8px; }
+  .rung { display: flex; align-items: center; gap: 10px; padding: 10px; }
+  .rung .num { font-family: var(--font-h); font-size: 13px; opacity: .6; width: 82px; }
+  .rung.cur { outline: 4px solid var(--sun); }
+  .rung.past { opacity: .55; }
+  .rung .kit { width: 30px; height: 30px; border-radius: 8px; border: 3px solid var(--ink); }
+
+  /* match */
+  .pitchwrap { position: relative; border: 3px solid var(--ink); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); background: #2E3A59; }
+  .simctl { position: absolute; right: 6px; bottom: 6px; display: flex; gap: 4px; }
+  .simctl .btn { padding: 3px 8px; font-size: 13px; }
+  .spellbadge { position: absolute; left: 8px; top: 6px; font-family: var(--font-h); font-size: 13px; background: rgba(0,0,0,.55); padding: 2px 8px; border-radius: 8px; color: #fff; }
+  .moment { position: absolute; inset: 0; background: rgba(8,10,25,.55); display: flex; align-items: center; justify-content: center; padding: 12px; animation: fadein .2s; }
+  .moment .panel { width: 100%; max-width: 360px; }
+  .moment h3 { font-size: 24px; color: var(--red); }
+  .moment.def h3 { color: #7a1410; }
+  .moment .opt { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 8px; justify-content: space-between; text-align: left; }
+  .moment .opt small { display: block; font-family: var(--font); font-size: 11px; opacity: .7; }
+
+  .intent { display: flex; gap: 10px; align-items: center; padding: 8px; }
+  .intent img { width: 50px; height: 50px; border-radius: 10px; border: 3px solid var(--ink); flex: none; }
+  .intent .lbl { font-size: 12px; opacity: .75; }
+  .intent .desc { font-size: 11px; opacity: .7; margin-top: 3px; }
+  .phase span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .intent .chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 3px; }
+  .ichip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 4px; border-radius: 8px; border: 2px solid var(--ink); background: var(--paper); color: var(--ink); font-size: 12px; font-weight: 900; cursor: help; }
+  .ichip i { font-style: normal; width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-size: 12px; }
+
+  .compare { padding: 8px 10px; }
+  .cgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  .crow { display: grid; grid-template-columns: 46px 24px 1fr 24px; gap: 4px; align-items: center; font-size: 11px; margin: 1px 0; }
+  .crow .v { font-family: var(--font-h); font-size: 13px; text-align: center; }
+  .crow .v.up { color: #17703a; } .crow .v.down { color: var(--bad); }
+  .sbar { height: 12px; border: 2px solid var(--ink); border-radius: 6px; overflow: hidden; display: flex; background: var(--red); }
+  .sbar i { display: block; height: 100%; background: var(--sun); border-right: 2px solid var(--ink); transition: width .25s; }
+  .proj { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: center; margin-top: 6px; font-size: 12.5px; }
+  .proj .odds { font-size: 13px; }
+  .staline { display: flex; gap: 8px; align-items: center; font-size: 12px; margin-top: 6px; }
+  .stabar { flex: 1; height: 10px; border: 2px solid var(--ink); border-radius: 6px; background: #e8dcbc; overflow: hidden; }
+  .stabar i { display: block; height: 100%; background: linear-gradient(90deg, #6fd36a, #2e9e4f); transition: width .25s; }
+  .stabar.opp i { background: linear-gradient(90deg, #ff8a80, #e8463a); }
+
+  .played { display: flex; gap: 6px; flex-wrap: wrap; min-height: 30px; align-items: center; }
+  .pchip { cursor: pointer; display: inline-flex; gap: 4px; align-items: center; padding: 3px 8px; border-radius: 9px; border: 2px solid var(--ink); background: var(--paper); color: var(--ink); font-size: 12px; font-weight: 900; animation: popin .25s; }
+  .pchip:hover::after { content: '↩'; opacity: .6; }
+  @keyframes popin { from { transform: scale(.4); opacity: 0; } }
+
+  .hand { display: flex; justify-content: center; padding: 14px 4px 8px; min-height: 170px; }
+  .hand .gcard { margin: 0 -14px; transform-origin: 50% 120%; }
+  .hand .gcard:hover, .hand .gcard:focus { z-index: 5; }
+  @media (max-width: 480px) { .hand .gcard { width: 92px; height: 140px; margin: 0 -17px; } .hand .gcard .text { font-size: 9.5px; } .hand .gcard .name { font-size: 11px; } }
+  .gcard.cant { filter: grayscale(.7) brightness(.8); }
+  .gcard .kbdh { position: absolute; bottom: 2px; right: 5px; font-size: 9px; opacity: .45; }
+  .gcard .art.tac { background: repeating-linear-gradient(0deg, #5DBB4C 0 8px, #52AE43 8px 16px); }
+  .gcard.fly { animation: fly .35s forwards; }
+  @keyframes fly { to { transform: translateY(-120px) scale(.4); opacity: 0; } }
+
+  .bottombar { display: flex; gap: 10px; align-items: center; justify-content: space-between; position: sticky; bottom: 0; padding: 8px 4px; padding-bottom: max(8px, env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 30%); z-index: 10; }
+  .shouts { display: flex; gap: 4px; align-items: center; font-family: var(--font-h); font-size: 13px; }
+  .gem { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--ink); background: var(--sky); box-shadow: inset -3px -3px 0 rgba(0,0,0,.2); display: grid; place-items: center; font-size: 12px; }
+  .gem.off { background: #39415e; box-shadow: none; }
+  .miniproj { font-size: 11px; display: flex; gap: 3px; align-items: center; margin: 3px 0 1px; white-space: nowrap; }
+  .miniproj .odds { font-size: 11px; padding: 0 5px; border-width: 1.5px; }
+  .deckinfo { font-size: 11px; opacity: .7; cursor: pointer; text-decoration: underline dotted; }
+
+  .rewards { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; padding: 10px 0; }
+  .rewards .gcard { width: 120px; height: 168px; }
+  .boons { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .deckgrid { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .deckgrid .gcard { width: 96px; height: 138px; cursor: default; }
+  .deckgrid .gcard:hover { transform: none; }
+  .trophy { font-size: 80px; text-align: center; animation: popin .5s; }
+</style>
+</head>
+<body>
+<script type="module" src="game.js"></script>
+</body>
+</html>
