@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111830">
+<title>Pitch Lab</title>
+<link rel="stylesheet" href="shared/ui.css">
+<style>
+  .hero { position: relative; border-bottom: 3px solid var(--ink); overflow: hidden; }
+  .hero canvas { width: 100%; }
+  .hero .over { position: absolute; left: 0; right: 0; top: 10px; text-align: center; pointer-events: none; }
+  .hero h1 { font-size: 44px; color: var(--sun); -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; text-shadow: 0 5px 0 var(--ink); }
+  .hero p { margin: 0; font-size: 14px; text-shadow: 0 2px 0 var(--ink); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; padding: 14px; max-width: 1100px; margin: 0 auto; }
+  .demo { display: flex; gap: 12px; text-decoration: none; color: var(--ink); align-items: center; position: relative; transition: transform .1s; }
+  .demo:hover { transform: translateY(-3px); }
+  .demo.soon { opacity: .55; pointer-events: none; }
+  .demo .pframe img { width: 76px; height: 76px; }
+  .demo h3 { font-size: 21px; }
+  .demo .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: #6a6f8a; font-weight: 900; }
+  .demo p { margin: 3px 0 0; font-size: 13px; line-height: 1.3; }
+  .demo .star { position: absolute; top: -10px; right: 10px; }
+  .demo.featured { grid-column: 1 / -1; background: linear-gradient(120deg, #fff6e0 60%, #ffe18a); }
+  .demo.featured .pframe img { width: 96px; height: 96px; }
+  .links { text-align: center; padding: 6px 0 30px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .section { max-width: 1100px; margin: 0 auto; padding: 0 14px; }
+  .section h2 { font-size: 22px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="hero"><canvas id="hero"></canvas><div class="over"><h1>PITCH LAB</h1><p>Turn-based football prototypes · Sunbirds FC vs Redrock United</p></div></div>
+<div class="section"><h2>Prototypes</h2></div>
+<div class="grid" id="grid"></div>
+<div class="links">
+  <a class="btn paper" href="cast/">Meet the cast</a>
+  <a class="btn ghost" href="https://github.com/hassaanm/pitch-lab/blob/main/DESIGN.md">Design doc</a>
+</div>
+<script type="module">
+  import { DEMOS } from './demos.js';
+  import { byId, CAST } from './shared/cast.js';
+  import { portrait, Pitch, drawPlayer, drawBall, setupCanvas } from './shared/art.js';
+
+  const grid = document.getElementById('grid');
+  for (const d of DEMOS) {
+    const a = document.createElement('a');
+    a.className = `demo panel ${d.status} ${d.star ? 'featured' : ''}`;
+    a.href = `demos/${d.slug}/`;
+    a.innerHTML = `<span class="pframe"><img src="${portrait(byId[d.face], 96)}" alt=""></span>
+      <div><div class="tag">${d.tag}${d.status === 'soon' ? ' · coming soon' : ''}</div><h3>${d.title}</h3><p>${d.pitch}</p></div>
+      ${d.star ? '<span class="chip star" style="background:var(--sun)">★ Start here</span>' : ''}`;
+    grid.appendChild(a);
+  }
+
+  // Hero: a little landscape slice of the stadium with the cast warming up.
+  const cv = document.getElementById('hero');
+  let ctx, pitch, W, H, actors;
+  function layout() {
+    W = Math.min(innerWidth, 1400); H = Math.max(190, Math.min(260, W * 0.32));
+    ctx = setupCanvas(cv, W, H);
+    cv.style.width = '100%';
+    pitch = new Pitch(W, H * 3.2, { variant: 'dusk' });
+    actors = CAST.map((c, i) => ({ c, x: (i + 0.5) / CAST.length * W, y: H * (0.62 + (i % 3) * 0.1), vx: (Math.random() - 0.5) * 30, pose: 'idle' }));
+  }
+  layout(); addEventListener('resize', layout);
+  let ball = { x: W / 2, y: H * 0.8, vx: 60, vy: -10 };
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const t = now / 1000;
+    ctx.save(); ctx.translate(0, -H * 1.1); pitch.draw(ctx, t, dt); ctx.restore();
+    ball.x += ball.vx * dt; ball.y += ball.vy * dt;
+    if (ball.x < 20 || ball.x > W - 20) ball.vx *= -1;
+    if (ball.y < H * 0.55 || ball.y > H * 0.95) ball.vy *= -1;
+    actors.sort((a, b) => a.y - b.y);
+    for (const a of actors) {
+      const dx = ball.x - a.x;
+      const near = Math.abs(dx) < 120 && Math.abs(ball.y - a.y) < 50;
+      a.pose = near ? 'run' : (Math.sin(t * 0.5 + a.x) > 0.95 ? 'celebrate' : 'idle');
+      if (near) a.x += Math.sign(dx) * 22 * dt;
+      if (near && Math.abs(dx) < 8) { ball.vx = (Math.random() - 0.5) * 160; ball.vy = (Math.random() - 0.5) * 60; }
+      drawPlayer(ctx, a.c, a.x, a.y, { size: Math.min(58, H * 0.26), pose: a.pose, t, facing: dx < 0 ? -1 : 1 });
+    }
+    drawBall(ctx, ball.x, ball.y, 5, t * ball.vx * 0.05);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>

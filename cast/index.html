@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Cast · Pitch Lab</title>
+<link rel="stylesheet" href="../shared/ui.css">
+<style>
+  .teams { max-width: 1100px; margin: 0 auto; padding: 12px; }
+  .team h2 { font-size: 26px; display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+  .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .pc { display: flex; gap: 10px; }
+  .pc canvas { flex: none; border-radius: 10px; background: #5DBB4C; border: 3px solid var(--ink); }
+  .pc h3 { font-size: 20px; }
+  .pc .meta { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: #6a6f8a; font-weight: 900; }
+  .pc p { margin: 3px 0; font-size: 13px; }
+  .stats { display: grid; grid-template-columns: auto 1fr; gap: 1px 6px; font-size: 11px; margin-top: 4px; }
+  .bar { height: 8px; border-radius: 4px; background: #e8dcbc; border: 1.5px solid var(--ink); overflow: hidden; align-self: center; }
+  .bar i { display: block; height: 100%; background: var(--grass); }
+  .poses { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 auto; max-width: 1100px; padding: 0 12px; }
+</style>
+</head>
+<body>
+<header class="topbar"><a class="back" href="../">◀ Lab</a><div class="title">The Cast</div></header>
+<div class="teams" id="teams"></div>
+<script type="module">
+  import { CAST, TEAMS, crestSVG } from '../shared/cast.js';
+  import { drawPlayer, setupCanvas } from '../shared/art.js';
+  const POSES = ['idle', 'run', 'kick', 'celebrate', 'sad', 'dive', 'slide'];
+  const root = document.getElementById('teams');
+  const sprites = [];
+  for (const tid of ['sun', 'red']) {
+    const t = TEAMS[tid];
+    const sec = document.createElement('section');
+    sec.className = 'team';
+    sec.innerHTML = `<h2>${crestSVG(tid, 34)} ${t.name}</h2><div class="roster"></div>`;
+    root.appendChild(sec);
+    for (const c of CAST.filter((c) => c.team === tid)) {
+      const card = document.createElement('div');
+      card.className = 'pc panel';
+      const st = c.stats;
+      const keys = c.pos === 'GK' ? ['keep', 'pass', 'pace', 'stamina'] : ['pace', 'pass', 'shoot', 'tackle', 'dribble', 'stamina'];
+      card.innerHTML = `<canvas></canvas><div><div class="meta">${c.pos} · #${c.num} · ${c.nick}</div><h3>${c.name}</h3><p>${c.bio}</p>
+        <p><b>★ ${c.special.name}:</b> ${c.special.text}</p>
+        <div class="stats">${keys.map((k) => `<span>${k}</span><span class="bar"><i style="width:${st[k] * 10}%"></i></span>`).join('')}</div></div>`;
+      sec.querySelector('.roster').appendChild(card);
+      const cv = card.querySelector('canvas');
+      const ctx = setupCanvas(cv, 96, 150);
+      sprites.push({ c, ctx, pose: 0, cv });
+      cv.title = 'Tap to change pose';
+      cv.onclick = () => { const s = sprites.find((s) => s.cv === cv); s.pose = (s.pose + 1) % POSES.length; };
+    }
+  }
+  function frame(now) {
+    const t = now / 1000;
+    for (const s of sprites) {
+      s.ctx.clearRect(0, 0, 96, 150);
+      s.ctx.fillStyle = '#5DBB4C'; s.ctx.fillRect(0, 0, 96, 150);
+      s.ctx.fillStyle = '#52AE43'; s.ctx.fillRect(0, 50, 96, 50);
+      drawPlayer(s.ctx, s.c, 48, 130, { size: 100, pose: POSES[s.pose], t });
+      s.ctx.fillStyle = '#fff'; s.ctx.font = '11px Lilita One'; s.ctx.fillText(POSES[s.pose], 4, 12);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>
