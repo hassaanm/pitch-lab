@@ -86,7 +86,7 @@ function layout() {
   pitch = new Pitch(W, Math.round(W * 2.4), { variant: S?.variant || 'day' });
 }
 const spotY = (z) => pitch.toPx(0.5, ZONE_V[z])[1];
-const sizeUs = () => H * 0.42, sizeThem = () => H * 0.38;
+const sizeUs = () => H * 0.48, sizeThem = () => H * 0.42;
 
 function actor(char, x, y, facing, size) {
   return { char, x, y, facing, size, pose: 'idle', look: 0, alpha: 1, speed: 1, glow: null };
@@ -175,7 +175,7 @@ function startPhase(id) {
   layout();
   A = {
     okeep: actor(byId.oskar, W / 2, pitch.y0 + 4, 1, H * 0.24),
-    wkeep: actor(byId.wak, W / 2, pitch.y1 - 2, 1, H * 0.24),
+    wkeep: actor(byId.wak, W / 2, pitch.y1 - 2, 1, H * 0.3),
   };
   A.okeep.pose = 'ready'; A.wkeep.pose = 'ready';
   cam.y = spotY(S.zone);
@@ -307,6 +307,7 @@ document.addEventListener('keydown', (e) => {
 async function stageDuel(g, ours, theirs, oursHasBall) {
   const sy = spotY(S.zone);
   tellEl.hidden = true;
+  hudYou.classList.remove('kd');
   A.us = actor(ours, -W * 0.25, sy + H * 0.38, 1, sizeUs());
   A.them = actor(theirs, W * 1.25, sy - H * 0.02, -1, sizeThem());
   A.us.pose = A.them.pose = 'run';
@@ -387,7 +388,7 @@ async function offense(g) {
   let choice;
   for (;;) {
     const items = [
-      { label: 'Dribble', sub: z === 4 ? 'round him, through on goal' : 'beat him, move up', odds: dOdds, value: 'dribble', cls: 'blue' },
+      { label: 'Dribble', sub: z === 4 ? 'round them, through on goal' : 'beat them, move up', odds: dOdds, value: 'dribble', cls: 'blue' },
       { label: 'Pass ▸', sub: opts.map((o) => o.name).join(' / '), odds: Math.max(...passOdds), value: 'pass', cls: 'green' },
       { label: 'Shoot', sub: canShoot ? (z === 4 ? 'from the box' : 'from range, Oskar −15%') : 'only in Attack / Box', odds: canShoot ? sOdds : null, value: 'shoot', cls: 'red', disabled: !canShoot },
       sp
@@ -434,7 +435,7 @@ async function offense(g) {
     }
     await W8(sleep(450), g);
   } else tellEl.hidden = true;
-  const why = tell === resp ? `the tell (${DEF_TELL[tell].why}) was honest` : `the ${DEF_TELL[tell].why} was a bluff`;
+  const why = tell === resp ? `the tell (${DEF_TELL[tell].why}) was honest` : `${DEF_TELL[tell].why} was a bluff`;
   const qTxt = q === 'off' ? '' : ` · ${q}`;
 
   if (base === 'dribble') {
@@ -445,13 +446,14 @@ async function offense(g) {
     if (ok) {
       const adv = ignore ? sp.adv : 1;
       shell.log(ignore ? `★ ${car.special.name}! ${car.name} goes straight past ${dc.name} (${pct(p)}${qTxt}).`
-        : resp === 'tackle' ? `${car.name} beat ${dc.name}'s tackle anyway (${pct(p)}${qTxt}).` : `${car.name} skins ${dc.name}: he chose ${RESP_LABEL[resp]}, ${why} (${pct(p)}${qTxt}).`, 'good', clockStr());
+        : resp === 'tackle' ? `${car.name} beat ${dc.name}'s tackle anyway (${pct(p)}${qTxt}).` : `${car.name} skins ${dc.name}, who chose ${RESP_LABEL[resp]}: ${why} (${pct(p)}${qTxt}).`, 'good', clockStr());
       addGuts(8);
       await dribblePast(g);
       if (z === 4) return throughOnGoal(g, car, 0.2, 'rounds the last man');
       S.zone = Math.min(4, z + adv);
     } else {
-      shell.log(`${dc.name} ${resp === 'tackle' ? 'read the dribble' : 'stopped the dribble'} and won it: ${why} (${pct(p)}${qTxt}).`, 'bad', clockStr());
+      shell.log(ignore ? `★ ${car.special.name} fizzles: ${dc.name} gets lucky (${pct(p)}${qTxt}).`
+        : `${dc.name} ${resp === 'tackle' ? 'read the dribble' : 'stopped the dribble'} and won it: ${why} (${pct(p)}${qTxt}).`, 'bad', clockStr());
       await tackled(g, A.them, A.us);
       turnover(z);
     }
@@ -473,7 +475,8 @@ async function offense(g) {
       if (z === 4) return throughOnGoal(g, to, 0.12, 'gets a cut-back');
       S.zone = Math.min(4, z + adv);
     } else {
-      shell.log(`${dc.name} ${resp === 'mark' ? 'read the pass and cut it out' : 'got a foot to the pass'}: ${why} (${pct(p)}${qTxt}).`, 'bad', clockStr());
+      shell.log(ignore ? `★ ${car.special.name} misfires: ${dc.name} gets a lucky touch (${pct(p)}${qTxt}).`
+        : `${dc.name} ${resp === 'mark' ? 'read the pass and cut it out' : 'got a foot to the pass'}: ${why} (${pct(p)}${qTxt}).`, 'bad', clockStr());
       await intercepted(g);
       turnover(z);
     }
@@ -514,6 +517,7 @@ async function throughOnGoal(g, car, bonus, how) {
 
 async function comboShot(g, a, b, combo) {
   // a passes, b receives in the box and hits it first time.
+  tellEl.hidden = true; readEl.innerHTML = '';
   ball.owner = null;
   A.us.pose = 'pass'; sfx.pass();
   const sy = spotY(4);
@@ -572,10 +576,12 @@ async function shoot(g, car, p, o) {
   const gy = pitch.y0;
   const sh = A.us;
   sh.pose = 'run'; sh.alpha = 1; ball.owner = sh;
+  tellEl.hidden = true;
+  hud(hudThem, byId.oskar, ['keep'], 'Keeper');
   await W8(Promise.all([
-    tween(cam, { y: gy + H * 0.28 }, 0.55),
-    tween(sh, { x: W * 0.42, y: gy + H * 0.66 }, 0.55),
-    o.blocked ? tween(A.them, { x: W * 0.58, y: gy + H * 0.52 }, 0.55) : tween(A.them, { alpha: 0 }, 0.3),
+    tween(cam, { y: gy + H * 0.2 }, 0.55),
+    tween(sh, { x: W * 0.4, y: gy + H * 0.6 }, 0.55),
+    o.blocked ? tween(A.them, { x: W * 0.6, y: gy + H * 0.42 }, 0.55) : tween(A.them, { alpha: 0 }, 0.3),
   ]), g);
   sh.pose = 'kick'; sfx.kick(); ball.owner = null;
   const side = Math.random() < 0.5 ? -1 : 1;
@@ -624,7 +630,7 @@ async function defense(g) {
   const z = S.zone;
   const am = RIVAL_ATT[z], ac = byId[am.id];
   const dc = byId[OUR_DEF[z]];
-  idleMenu(`${ac.name} has it in ${['your box', 'your half', 'midfield', 'his half', 'his own box'][z]}…`);
+  idleMenu(`${ac.name} has it in ${['your box', 'your half', 'midfield', 'their half', 'their box'][z]}…`);
   await stageDuel(g, dc, ac, false);
   const c = { sta: S.sta[ac.id], last: S.theirLast };
   const prior = norm(am.prior(c));
@@ -643,7 +649,7 @@ async function defense(g) {
   const choice = await W8(menu([
     { label: 'Tackle', sub: 'beats Dribble', odds: odds('tackle'), value: 'tackle', cls: 'red' },
     { label: 'Mark', sub: 'beats Pass', odds: odds('mark'), value: 'mark', cls: 'purple' },
-    { label: 'Press', sub: 'so-so vs all · tires him', odds: odds('press'), value: 'press', cls: 'blue' },
+    { label: 'Press', sub: 'so-so vs all · tires them', odds: odds('press'), value: 'press', cls: 'blue' },
     dsp ? { label: `★ ${dc.special.name}`, sub: dsp.text, odds: 1, value: 'special', cls: 'gold', disabled: S.guts < SPECIAL_COST, cost: SPECIAL_COST }
       : { label: '★ Special', sub: `${dc.name} has no defensive special`, disabled: true, value: 'special', cls: 'gold' },
   ]), g);
@@ -659,13 +665,13 @@ async function defense(g) {
   revealTell(iLabels[intent], tell === intent);
   popAt(A.them, iLabels[intent].toUpperCase() + '!', '#ffb3ab');
   await W8(sleep(420), g);
-  const why = tell === intent ? `his tell (${ATT_TELL[tell].why}) was honest` : `the ${ATT_TELL[tell].why} was a bluff`;
+  const why = tell === intent ? `the tell (${ATT_TELL[tell].why}) was honest` : `${ATT_TELL[tell].why} was a bluff`;
   const qTxt = q === 'off' ? '' : ` · ${q}`;
   const p = choice === 'special' ? 1 : withQ(pWin(dc, ac, choice, intent), q);
   const win = Math.random() < p;
   if (win) {
     shell.log(choice === 'special' ? `★ ${dc.special.name}! ${dc.name} wins it from ${ac.name}.`
-      : `${dc.name} ${choice === 'tackle' ? 'tackles' : choice === 'mark' ? 'intercepts' : 'harries'} ${ac.name}: he went to ${intent}, ${why} (${pct(p)}${qTxt}).`, 'good', clockStr());
+      : `${dc.name} ${choice === 'tackle' ? 'tackles' : choice === 'mark' ? 'intercepts' : 'harries'} ${ac.name} (${intent}): ${why} (${pct(p)}${qTxt}).`, 'good', clockStr());
     addGuts(8);
     await tackled(g, A.us, A.them);
     A.us.pose = 'idle';
@@ -679,7 +685,7 @@ async function defense(g) {
   }
   S.theirLast = intent;
   if (choice === 'press') { S.sta[ac.id] = Math.max(1, S.sta[ac.id] - 3); }
-  shell.log(`${ac.name} ${intent === 'dribble' ? 'skips past' : intent === 'pass' ? 'passes around' : 'gets a shot away past'} ${dc.name}: you chose ${choice}, ${why} (${pct(p)}${qTxt}).${choice === 'press' ? ` Your press cost him 3 stamina (${S.sta[ac.id].toFixed(1)}).` : ''}`, 'them', clockStr());
+  shell.log(`${ac.name} ${intent === 'dribble' ? 'skips past' : intent === 'pass' ? 'passes around' : 'gets a shot away past'} ${dc.name}: you chose ${choice}, ${why} (${pct(p)}${qTxt}).${choice === 'press' ? ` Your press cost them 3 stamina (${S.sta[ac.id].toFixed(1)}).` : ''}`, 'them', clockStr());
   if (intent === 'shoot' || z === 0) return keeperDuel(g, ac, intent === 'shoot' ? '' : 'through on goal');
   // they move down a zone
   if (intent === 'dribble') {
@@ -707,6 +713,9 @@ async function keeperDuel(g, shooter, how) {
   const post = posterior(prior, tell);
   const gy = pitch.y1;
   const wk = A.wkeep;
+  const home = W * 0.56; // Wak stands a touch right so the HUD doesn't cover him
+  wk.x = home;
+  hudYou.classList.add('kd');
   // camera down to your goal
   A.them.pose = 'run';
   await W8(Promise.all([
@@ -745,12 +754,12 @@ async function keeperDuel(g, shooter, how) {
   const tx = W / 2 + side * pitch.goalW * 0.42;
   wk.pose = choice === 'dive' ? 'dive' : choice === 'punch' ? 'header' : 'ready';
   wk.facing = side < 0 ? -1 : 1;
-  const wkx = choice === 'dive' ? W / 2 + (saved ? side || 0.6 : -(side || 0.6)) * pitch.goalW * 0.3 : W / 2;
+  const wkx = choice === 'dive' ? W / 2 + (saved ? side || 0.6 : -(side || 0.6)) * pitch.goalW * 0.3 : home;
   await W8(Promise.all([
     tween(ball, { x: saved ? lerp(tx, wkx, 0.7) : tx, y: saved ? gy - 10 : gy + pitch.netDepth * 0.6 }, type === 'power' ? 0.26 : 0.4, { arc: type === 'placed' ? 22 : 10, ease: linear }),
     tween(wk, { x: wkx }, 0.28),
   ]), g);
-  const why = tell === type ? `his tell (${SHOT_TELL[tell].why}) was honest` : `the ${SHOT_TELL[tell].why} was a bluff`;
+  const why = tell === type ? `the tell (${SHOT_TELL[tell].why}) was honest` : `${SHOT_TELL[tell].why} was a bluff`;
   const qTxt = q === 'off' ? '' : ` · ${q}`;
   if (saved) {
     sfx.save(); freeze(120); shell.shake(); shell.banner('SAVED!', 'Wak', '#9ef0a8');
@@ -774,6 +783,7 @@ async function keeperDuel(g, shooter, how) {
     S.poss = 'us'; S.zone = 2; S.carrier = 'kenji'; S.last = null; S.theirLast = null;
   }
   wk.pose = 'ready'; wk.x = W / 2; wk.facing = 1;
+  hudYou.classList.remove('kd');
 }
 
 // ------------------------------------------------------------------ full time

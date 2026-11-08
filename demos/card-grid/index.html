@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111830">
+<title>Card Grid · Pitch Lab</title>
+<link rel="stylesheet" href="../../shared/ui.css">
+<style>
+  .cg { display: flex; flex-direction: column; gap: 6px; max-width: 566px; margin: 0 auto; }
+  .layout { padding-top: 8px; }
+  .pitchwrap { position: relative; border: 3px solid var(--ink); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); background: #2E3A59; }
+  .pitchwrap canvas { margin: 0 auto; }
+  .badge, .possb { position: absolute; top: 5px; font-family: var(--font-h); font-size: 12px; background: rgba(0,0,0,.6); padding: 2px 8px; border-radius: 8px; color: #fff; pointer-events: none; }
+  .badge { left: 6px; }
+  .possb { right: 6px; }
+  .possb.you { background: rgba(29,43,83,.85); color: var(--sun); }
+  .possb.opp { background: rgba(122,20,16,.85); }
+
+  .plan { display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 6px; align-items: center; font-size: 12px; min-height: 26px; white-space: nowrap; }
+  .plan::-webkit-scrollbar { display: none; }
+  .plan .ph { font-family: var(--font-h); color: #FF8A80; font-size: 13px; }
+  .plan .pi { background: rgba(255,255,255,.07); border: 1.5px solid rgba(255,255,255,.15); border-radius: 8px; padding: 1px 6px; display: inline-flex; gap: 4px; align-items: center; }
+  .plan .pi.press { border-color: #FF5A4E; }
+  .plan .pi.dodged { opacity: .55; }
+  .plan .pi.big { border-color: var(--sun); }
+  .plan .odds { font-size: 11px; padding: 0 5px; border-width: 1.5px; }
+  .hint { position: absolute; left: 0; right: 0; bottom: 0; font-size: 11.5px; line-height: 1.25; padding: 3px 8px; background: rgba(10,14,30,.78); color: #fff; pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hint b { color: var(--sun); font-weight: 900; }
+
+  .hand { display: flex; justify-content: center; padding: 6px 0 4px; min-height: 130px; }
+  .hand .gcard { margin: 0 -5px; transform: rotate(var(--rot, 0deg)); transform-origin: 50% 120%; width: 96px; height: 138px; }
+  .hand .gcard:hover { transform: rotate(var(--rot, 0deg)) translateY(-6px); z-index: 3; }
+  .hand .gcard.sel { transform: translateY(-14px); z-index: 4; }
+  .gcard.cant { filter: grayscale(.75) brightness(.75); }
+  .gcard .art.tac { background: repeating-linear-gradient(0deg, #5DBB4C 0 8px, #52AE43 8px 16px); }
+  .gcard .kbdh { position: absolute; bottom: 2px; right: 5px; font-size: 9px; opacity: .45; }
+  .gcard .bestp { position: absolute; top: 58px; right: 8px; font-family: var(--font-h); font-size: 11px; color: #fff; padding: 0 5px; border-radius: 99px; border: 1.5px solid var(--ink); z-index: 2; }
+  .bestp.hi { background: var(--good); } .bestp.mid { background: var(--warn); } .bestp.lo { background: #e07a1f; } .bestp.vlo { background: var(--bad); }
+  @media (max-width: 480px) {
+    .hand .gcard { width: 76px; height: 120px; margin: 0 -2px; }
+    .hand .gcard .art { height: 34px; margin: 3px 4px 0; font-size: 20px; }
+    .hand .gcard .text { font-size: 8.6px; padding: 1px 3px 5px; line-height: 1.15; }
+    .hand .gcard .name { font-size: 10px !important; padding-left: 20px; }
+    .hand .gcard .type { font-size: 7.5px; }
+    .hand .gcard .cost { width: 22px; height: 22px; font-size: 13px; }
+    .hand .gcard .bestp { top: 42px; right: 5px; font-size: 10px; }
+    .hand .gcard .kbdh { display: none; }
+  }
+
+  .bottombar { display: flex; gap: 8px; align-items: center; padding: 0 2px; }
+  .bottombar .lft { flex: 1; min-width: 0; }
+  .bottombar .btn { min-height: 42px; }
+  .energy { display: flex; gap: 4px; align-items: center; }
+  .energy .elbl { font-size: 16px; }
+  .gem { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--ink); background: var(--sun); box-shadow: inset -3px -3px 0 rgba(0,0,0,.2); }
+  .gem.off { background: #39415e; box-shadow: none; }
+  .deckinfo { font-size: 10.5px; opacity: .65; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rewards { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; padding: 8px 0; }
+  .rewards .gcard { width: 104px; height: 150px; }
+</style>
+</head>
+<body>
+<script type="module" src="game.js"></script>
+</body>
+</html>

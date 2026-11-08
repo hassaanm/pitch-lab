@@ -11,7 +11,7 @@ export const TIERS = {
 
 export const PUZZLES = [
   // ------------------------------------------------------------ tutorial
-  { id: 'e1', tier: 'early', name: 'Tap-in', turns: 1, ball: '1', cast: { 1: 'rio' },
+  { id: 'e1', par: 2, tier: 'early', name: 'Tap-in', turns: 1, ball: '1', cast: { 1: 'rio' },
     hint: 'The keeper covers his column and one either side. Find the lane he cannot reach.',
     map: [
       '.k...',
@@ -22,7 +22,7 @@ export const PUZZLES = [
       '.....',
       '.....',
     ] },
-  { id: 'e2', tier: 'early', name: 'Wall Pass', turns: 1, ball: '1', cast: { 1: 'kenji', 2: 'rio' },
+  { id: 'e2', par: 3, tier: 'early', name: 'Wall Pass', turns: 1, ball: '1', cast: { 1: 'kenji', 2: 'rio' },
     hint: 'Pass first, then the receiver can still run. One pass per turn.',
     map: [
       '.k...',
@@ -33,7 +33,7 @@ export const PUZZLES = [
       '..1..',
       '.....',
     ] },
-  { id: 'e3', tier: 'early', name: 'Pull the Keeper', turns: 2, ball: '1', cast: { 1: 'rio', 2: 'kenji' },
+  { id: 'e3', par: 3, tier: 'early', name: 'Pull the Keeper', turns: 2, ball: '1', cast: { 1: 'rio', 2: 'kenji' },
     hint: 'The keeper slides toward the ball\'s column at the end of each turn. Show him one side, score on the other.',
     map: [
       '..k..',
@@ -44,18 +44,18 @@ export const PUZZLES = [
       '2....',
       '.....',
     ] },
-  { id: 'e4', tier: 'early', name: 'Read the Arrows', turns: 2, ball: '1', cast: { 1: 'pip', 2: 'rio' },
+  { id: 'e4', par: 4, tier: 'early', name: 'Read the Arrows', turns: 2, ball: '1', cast: { 1: 'pip', 2: 'rio' },
     hint: 'Red arrows show where each defender will step when you end the turn. Never finish next to one.',
     map: [
       '..k..',
       '.....',
       '.d...',
       '...d.',
-      '..1..',
+      '....1',
       '.....',
       '2....',
     ] },
-  { id: 'e5', tier: 'early', name: 'Body Block', turns: 2, ball: '1', cast: { 1: 'rio', 2: 'mo' },
+  { id: 'e5', par: 4, tier: 'early', name: 'Body Block', turns: 2, ball: '1', cast: { 1: 'rio', 2: 'mo' },
     hint: 'A defender stops when an attacker stands on his path. Use Big Mo as a wall.',
     map: [
       '..k..',
@@ -66,7 +66,7 @@ export const PUZZLES = [
       '...1.',
       '..2..',
     ] },
-  { id: 'e6', tier: 'early', name: 'Sprinter', turns: 2, ball: '1', cast: { 1: 'kenji', 2: 'rio' },
+  { id: 'e6', par: 4, tier: 'early', name: 'Sprinter', turns: 2, ball: '1', cast: { 1: 'kenji', 2: 'rio' },
     hint: 'Kofi covers two squares a turn. Leave the ball where his two steps cannot reach.',
     map: [
       '..k..',
@@ -79,18 +79,18 @@ export const PUZZLES = [
     ] },
 
   // ------------------------------------------------------------ medium
-  { id: 'm1', tier: 'mid', name: 'Shadow', turns: 2, ball: '1', mark: '2', cast: { 1: 'kenji', 2: 'rio', 3: 'bruno' },
-    hint: 'Spider Lu ignores the ball and follows Rio. Rio is a decoy now.',
+  { id: 'm1', par: 3, tier: 'mid', name: 'Shadow', turns: 2, ball: '1', mark: '2', cast: { 1: 'kenji', 2: 'rio', 3: 'bruno' },
+    hint: 'Spider Lu ignores the ball and follows Rio. Where will he be after your turn?',
     map: [
       '..k..',
+      '...m.',
       '.....',
-      '..m..',
-      '...2.',
+      '....2',
       '.d...',
-      '..1..',
-      '3....',
+      '.1...',
+      '...3.',
     ] },
-  { id: 'm2', tier: 'mid', name: 'The Sweeper', turns: 2, ball: '1', cast: { 1: 'pip', 2: 'rio', 3: 'kenji' },
+  { id: 'm2', par: 4, tier: 'mid', name: 'The Sweeper', turns: 2, ball: '1', cast: { 1: 'pip', 2: 'rio', 3: 'kenji' },
     hint: 'Nils only slides along his row. Get him to one side, then go through the hole.',
     map: [
       '..k..',
@@ -101,7 +101,7 @@ export const PUZZLES = [
       '1...2',
       '..3..',
     ] },
-  { id: 'm3', tier: 'mid', name: 'Sleeping Giant', turns: 2, ball: '1', cast: { 1: 'bruno', 2: 'rio', 3: 'kenji' },
+  { id: 'm3', par: 5, tier: 'mid', name: 'Sleeping Giant', turns: 2, ball: '1', cast: { 1: 'bruno', 2: 'rio', 3: 'kenji' },
     hint: 'Dima only moves on odd turns. On turn 2 he stands still — plan around that.',
     map: [
       '..k..',
@@ -109,10 +109,10 @@ export const PUZZLES = [
       '..g..',
       '.d.d.',
       '.....',
-      '..1..',
+      '...1.',
       '2...3',
     ] },
-  { id: 'm4', tier: 'mid', name: 'Switch of Play', turns: 2, ball: '1', cast: { 1: 'kenji', 2: 'rio', 3: 'pip' },
+  { id: 'm4', par: 5, tier: 'mid', name: 'Switch of Play', turns: 2, ball: '1', cast: { 1: 'kenji', 2: 'rio', 3: 'pip' },
     hint: 'Long diagonal passes are legal if nobody stands on the line.',
     map: [
       '..k..',
@@ -123,7 +123,7 @@ export const PUZZLES = [
       '.....',
       '...23',
     ] },
-  { id: 'm5', tier: 'mid', name: 'Two Shadows', turns: 2, ball: '2', mark: '1', cast: { 1: 'rio', 2: 'kenji', 3: 'sol' },
+  { id: 'm5', par: 4, tier: 'mid', name: 'Two Shadows', turns: 2, ball: '2', mark: '1', cast: { 1: 'rio', 2: 'kenji', 3: 'sol' },
     hint: 'Lu marks Rio, the sprinter hunts the ball. Who is free?',
     map: [
       '..k..',
@@ -134,20 +134,20 @@ export const PUZZLES = [
       '.2...',
       '....3',
     ] },
-  { id: 'm6', tier: 'mid', name: 'Crowded Box', turns: 2, ball: '1', cast: { 1: 'rio', 2: 'kenji', 3: 'bruno' },
+  { id: 'm6', par: 5, tier: 'mid', name: 'Crowded Box', turns: 2, ball: '1', cast: { 1: 'rio', 2: 'kenji', 3: 'bruno' },
     hint: 'Three defenders, one turn to bait them. Where do you want them standing?',
     map: [
       '..k..',
       '.d.d.',
       '..d..',
       '.....',
-      '..1..',
+      '...1.',
       '2...3',
       '.....',
     ] },
 
   // ------------------------------------------------------------ clutch
-  { id: 'c1', tier: 'clutch', name: 'Stoppage Time', turns: 3, ball: '1', cast: { 1: 'kenji', 2: 'rio', 3: 'sol' },
+  { id: 'c1', par: 4, tier: 'clutch', name: 'Stoppage Time', turns: 3, ball: '1', cast: { 1: 'kenji', 2: 'rio', 3: 'sol' },
     hint: 'Three turns. Turn 1 sets the bait, turn 2 springs it.',
     map: [
       '..k..',
@@ -155,10 +155,10 @@ export const PUZZLES = [
       '..d..',
       '.f...',
       '.....',
-      '.1...',
+      '..1..',
       '3...2',
     ] },
-  { id: 'c2', tier: 'clutch', name: 'Floodlights', turns: 3, ball: '1', mark: '2', cast: { 1: 'pip', 2: 'rio', 3: 'kenji' },
+  { id: 'c2', par: 4, tier: 'clutch', name: 'Floodlights', turns: 3, ball: '1', mark: '2', cast: { 1: 'pip', 2: 'rio', 3: 'kenji' },
     hint: 'Lu sticks to Rio all night. Use that.',
     map: [
       '..k..',
@@ -166,10 +166,10 @@ export const PUZZLES = [
       '.d.m.',
       '...2.',
       '.....',
-      '1....',
+      '..1..',
       '...3.',
     ] },
-  { id: 'c3', tier: 'clutch', name: 'Last Kick', turns: 2, ball: '1', cast: { 1: 'kenji', 2: 'rio', 3: 'sol', 4: 'bruno' },
+  { id: 'c3', par: 4, tier: 'clutch', name: 'Last Kick', turns: 2, ball: '1', cast: { 1: 'kenji', 2: 'rio', 3: 'sol', 4: 'bruno' },
     hint: 'Four attackers, one pass a turn. Most of them are screens.',
     map: [
       '..k..',
@@ -180,7 +180,7 @@ export const PUZZLES = [
       '1.4.2',
       '..3..',
     ] },
-  { id: 'c4', tier: 'clutch', name: 'Iron Curtain', turns: 3, ball: '1', cast: { 1: 'kenji', 2: 'rio', 3: 'pip' },
+  { id: 'c4', par: 5, tier: 'clutch', name: 'Iron Curtain', turns: 3, ball: '1', cast: { 1: 'kenji', 2: 'rio', 3: 'pip' },
     hint: 'The sweeper and the giant guard the middle. Go around, then back.',
     map: [
       '..k..',
@@ -191,15 +191,15 @@ export const PUZZLES = [
       '..1..',
       '2...3',
     ] },
-  { id: 'c5', tier: 'clutch', name: 'Everybody Back', turns: 3, ball: '1', mark: '3', cast: { 1: 'kenji', 2: 'rio', 3: 'sol', 4: 'pip' },
+  { id: 'c5', par: 6, tier: 'clutch', name: 'Everybody Back', turns: 3, ball: '1', mark: '3', cast: { 1: 'kenji', 2: 'rio', 3: 'sol', 4: 'pip' },
     hint: 'Every defender type at once. Read every arrow before you move.',
     map: [
       '..k..',
       '.s...',
       '...g.',
       '.d.m.',
-      '..f..',
-      '.1.3.',
+      '.f...',
+      '..13.',
       '2...4',
     ] },
 ];

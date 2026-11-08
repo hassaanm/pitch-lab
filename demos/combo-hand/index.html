@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Combo Hand · Pitch Lab</title>
+<link rel="stylesheet" href="../../shared/ui.css">
+<style>
+  body.floodlit { background-color: #0b1022; background-image: radial-gradient(ellipse at 50% -10%, rgba(255,255,220,.16), transparent 55%), radial-gradient(circle at 0 0, rgba(255,255,230,.10), transparent 30%), radial-gradient(circle at 100% 0, rgba(255,255,230,.10), transparent 30%); }
+  body.dusk { background-image: radial-gradient(circle at 50% 0%, rgba(255,140,60,.16), transparent 50%); }
+  .ch { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 7px; }
+
+  .topinfo { padding: 7px 9px; }
+  .topinfo .row1, .topinfo .row2 { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .topinfo .tier { font-family: var(--font-h); font-weight: 400; font-size: 15px; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bosschip { background: var(--red); color: #fff; border: 2px solid var(--ink); border-radius: 99px; padding: 0 7px; font-family: var(--font-h); font-size: 12px; white-space: nowrap; }
+  .money { font-family: var(--font-h); color: var(--sun); font-size: 17px; }
+  .row2 { justify-content: space-between; margin-top: 3px; opacity: .9; }
+  .row2 b { font-family: var(--font-h); font-weight: 400; font-size: 15px; color: var(--sun); }
+  .goalbar { position: relative; height: 20px; margin: 5px 0 2px; background: #0b0f1d; border: 2.5px solid var(--ink); border-radius: 8px; }
+  .goalbar i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 5px; transition: width .5s; }
+  .goalbar .fill { background: linear-gradient(#ffe680, #e0a800); }
+  .goalbar .ghost { background: repeating-linear-gradient(45deg, rgba(126,224,138,.9) 0 5px, rgba(46,158,79,.9) 5px 10px); transition: width .2s; }
+  .goalbar .sc { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--font-h); font-weight: 400; font-size: 12px; -webkit-text-stroke: 2px var(--ink); paint-order: stroke fill; }
+  .goalbar .tick { position: absolute; top: -9px; transform: translateX(-50%); font-size: 12px; filter: grayscale(.7) opacity(.7); }
+  .goalbar .tick::after { content: ''; position: absolute; left: 50%; top: 12px; height: 18px; border-left: 2px dashed rgba(255,255,255,.5); }
+  .goalbar .tick.got { filter: none; }
+  .goalbar .tick.win { font-size: 14px; top: -11px; }
+
+  .coaches { display: flex; gap: 5px; justify-content: center; }
+  .coaches.none .slot { height: 30px; }
+  .coaches .slot { width: 62px; height: 80px; border: 2px dashed rgba(255,255,255,.22); border-radius: 10px; display: grid; place-items: center; font-size: 10px; opacity: .5; text-transform: uppercase; }
+  .gcard.mini { width: 62px; height: 80px; border-radius: 10px; }
+  .gcard.mini::before { height: 17px; }
+  .gcard.mini .name { font-size: 9.5px; height: 17px; padding: 2px 2px 0; line-height: 1; }
+  .gcard.mini .art { height: 40px; margin: 3px 4px 0; border-radius: 6px; }
+  .gcard.mini .type { font-size: 8px; }
+  .gcard.mini .text { display: none; }
+  .gcard.coach .art { background-size: cover; background-color: #1d2b53; }
+  .cbadge { position: absolute; right: 2px; top: 44px; background: var(--red); color: #fff; font-family: var(--font-h); font-size: 11px; border: 2px solid var(--ink); border-radius: 6px; padding: 0 3px; z-index: 2; }
+  .gcard.coach.fire { animation: fire .45s; }
+  @keyframes fire { 30% { transform: translateY(-10px) rotate(-6deg) scale(1.12); box-shadow: 0 0 0 3px #ff8a65, 0 6px 0 var(--ink); } 60% { transform: rotate(4deg); } }
+
+  .board { position: relative; border: 3px solid var(--ink); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); background: #2E3A59; }
+  .calc { position: relative; align-self: center; z-index: 3; display: flex; align-items: center; gap: 6px; margin-bottom: -4px; min-height: 34px; background: rgba(15,20,40,.86); border: 2.5px solid var(--ink); border-radius: 12px; padding: 3px 7px; white-space: nowrap; box-shadow: 0 3px 0 var(--ink); }
+  .calc .hname { font-family: var(--font-h); font-size: 14px; color: #fff; }
+  .calc .hname small { font-size: 11px; color: var(--sun); }
+  .calc .cm { display: flex; align-items: center; gap: 3px; }
+  .calc .chips, .calc .mult { font-family: var(--font-h); font-size: 17px; min-width: 34px; text-align: center; border: 2px solid var(--ink); border-radius: 7px; padding: 0 5px; color: #fff; }
+  .calc .chips { background: #2f8be0; } .calc .mult { background: #e8463a; }
+  .calc .x { font-family: var(--font-h); color: #fff; }
+  .calc .tot { font-family: var(--font-h); font-size: 15px; color: #fff; }
+  .calc .tot b { font-weight: 400; font-size: 19px; color: var(--sun); }
+  .calc.empty .cm, .calc.empty .tot { opacity: .35; }
+  .calc .bump, .calc.bump { animation: bumpy .25s; }
+  .bump { animation: bumpy .25s; }
+  @keyframes bumpy { 40% { transform: scale(1.3) rotate(-3deg); } }
+  .calc.flame { box-shadow: 0 0 0 2px #ffb300, 0 0 22px 6px rgba(255,120,0,.75), 0 3px 0 var(--ink); background: linear-gradient(0deg, rgba(200,50,10,.92), rgba(15,20,40,.9) 70%); animation: flame .25s infinite alternate; }
+  @keyframes flame { to { box-shadow: 0 0 0 2px #ffd23f, 0 -4px 30px 10px rgba(255,80,0,.8), 0 3px 0 var(--ink); } }
+  .extra { position: absolute; left: 4px; right: 4px; bottom: 4px; z-index: 3; display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; pointer-events: none; }
+  .extra span { font-size: 10px; font-weight: 900; background: rgba(255,246,224,.92); color: var(--ink); border: 1.5px solid var(--ink); border-radius: 6px; padding: 0 4px; }
+
+  .handwrap { position: relative; height: 150px; overflow-x: clip; }
+  .hand { position: absolute; inset: 24px 0 0 0; }
+  .hand .gcard { position: absolute; top: 0; width: 86px; height: 120px; transform-origin: 50% 130%; transition: transform .14s, left .2s, box-shadow .12s; }
+  .hand .gcard .cost { width: 28px; height: 28px; font-size: 17px; background: #fff; }
+  .hand .gcard .name { font-size: 11px; padding-left: 24px; }
+  .hand .gcard .art { height: 46px; margin: 3px 5px 0; background-size: cover; }
+  .hand .gcard .type { font-size: 8.5px; letter-spacing: .3px; }
+  .hand .gcard .text { font-size: 9.5px; padding: 0 4px 4px; }
+  .hand .gcard.star .text { color: #a06a00; }
+  .hand .gcard.sel { box-shadow: 0 0 0 3px var(--sun), 0 7px 0 var(--ink); }
+  .hand .gcard.dealt { animation: deal .28s backwards; }
+  @keyframes deal { from { opacity: 0; translate: 0 80px; } }
+  .gcard .kh { position: absolute; right: 4px; bottom: 2px; font-size: 9px; opacity: .45; font-weight: 900; }
+
+  .actions { display: flex; gap: 6px; }
+  .actions .btn { min-height: 44px; }
+  .actions [data-a=play] { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+
+  .shop .bank { font-family: var(--font-h); font-size: 28px; color: var(--sun-d); text-align: right; margin-top: -30px; }
+  .shop .shelf { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 10px 0; }
+  .shop .item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .shop .gcard { cursor: default; }
+  .shop .gcard .text { font-size: 10px; }
+  .upgcard .art { font-size: 30px; background: #fff3c4; }
+  .upgcard .cost { background: var(--sun); }
+</style>
+</head>
+<body>
+<script type="module" src="game.js"></script>
+</body>
+</html>

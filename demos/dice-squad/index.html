@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111830">
+<title>Dice Squad · Pitch Lab</title>
+<link rel="stylesheet" href="../../shared/ui.css">
+<style>
+  .ds { display: flex; flex-direction: column; gap: 7px; max-width: 620px; margin: 0 auto; }
+  .kh { position: absolute; right: 3px; bottom: 1px; font-size: 9px; opacity: .5; font-family: var(--font); font-weight: 900; pointer-events: none; color: var(--ink); }
+  @media (hover: none) { .kh, .btn .key { display: none; } }
+
+  .status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .status .mname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status .mname b { font-family: var(--font-h); font-weight: 400; font-size: 15px; }
+  .clock { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 12px; }
+  .clock .kicker { font-family: var(--font-h); color: var(--sun); font-size: 13px; }
+  .clock .kicker.red { color: #ff8a80; }
+  .clock .pip { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--ink); background: #39415e; display: inline-block; }
+  .clock .pip.on { background: var(--sun); }
+  .clock .pip.on.hot { background: var(--red); animation: hot .5s ease-in-out infinite alternate; }
+  @keyframes hot { to { transform: scale(1.25); } }
+
+  .pitchwrap { position: relative; border: 3px solid var(--ink); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); background: #2E3A59; }
+  .modebadge { position: absolute; left: 8px; top: 6px; font-family: var(--font-h); font-size: 12px; background: rgba(0,0,0,.55); padding: 2px 8px; border-radius: 8px; color: var(--sun); }
+  .modebadge.def { color: #ff8a80; }
+
+  /* zone track: each zone's wall HP */
+  .ztrack { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; min-height: 52px; }
+  .zp { position: relative; border-radius: 10px; padding: 4px 5px; background: rgba(255,255,255,.06); border: 2px solid rgba(255,255,255,.15); font-size: 11px; display: flex; flex-direction: column; gap: 3px; }
+  .zp b { font-family: var(--font-h); font-weight: 400; font-size: 12px; white-space: nowrap; display: flex; justify-content: space-between; gap: 2px; }
+  .zp b small { font-size: 10px; }
+  .zp.on { background: var(--paper); color: var(--ink); border-color: var(--ink); box-shadow: 0 3px 0 var(--ink); }
+  .zp.done { opacity: .45; }
+  .zp .n { font-size: 11px; opacity: .8; }
+  .hp { display: block; height: 10px; border: 2px solid var(--ink); border-radius: 6px; background: #0b0f1d; overflow: hidden; flex: none; }
+  .hp i { display: block; height: 100%; background: linear-gradient(90deg, #ff8a80, #e8463a); transition: width .35s cubic-bezier(.3,1.4,.5,1); }
+  .zp.hit { animation: zhit .35s; }
+  @keyframes zhit { 20% { transform: translateX(-4px) rotate(-2deg); background: #fff; } 50% { transform: translateX(4px) rotate(1deg); } }
+  .threat { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; background: #3a1414; border: 3px solid var(--ink); border-radius: 12px; padding: 5px 8px; box-shadow: var(--shadow); font-size: 13px; }
+  .threat img { width: 40px; height: 40px; border-radius: 8px; border: 2px solid var(--ink); }
+  .threat .hp { display: inline-block; width: 90px; vertical-align: middle; }
+  .threat .grow { flex: 1; }
+
+  .info { font-size: 12.5px; min-height: 30px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+  /* dice */
+  .tray { display: flex; align-items: center; gap: 8px; background: #2a2236; border: 3px solid var(--ink); border-radius: 14px; padding: 7px; min-height: 70px; box-shadow: inset 0 3px 0 rgba(0,0,0,.25); }
+  .dice { display: flex; gap: 7px; flex: 1; flex-wrap: wrap; align-items: center; }
+  .tray .btn { flex: none; min-height: 44px; }
+  .die { --dc: #fff6e0; position: relative; width: 50px; height: 50px; border-radius: 12px; background: var(--dc); border: 3px solid var(--ink); box-shadow: 0 4px 0 var(--ink), inset -4px -4px 0 rgba(0,0,0,.12); display: inline-grid; place-items: center; cursor: pointer; transition: transform .1s; flex: none; user-select: none; touch-action: manipulation; }
+  .die .pips { width: 70%; height: 70%; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
+  .die .pips i { display: block; width: 72%; height: 72%; margin: auto; border-radius: 50%; }
+  .die .pips i.on { background: var(--ink); box-shadow: inset 1px 1px 0 rgba(255,255,255,.3); }
+  .die:hover { transform: translateY(-3px); }
+  .die.sel { --dc: var(--sun); transform: translateY(-6px) rotate(-6deg); box-shadow: 0 0 0 3px #fff, 0 8px 0 var(--ink); }
+  .die.rolling { animation: tumble .5s cubic-bezier(.3,1.3,.5,1) both; }
+  @keyframes tumble { 0% { transform: translateY(-40px) rotate(-200deg) scale(.6); opacity: 0; } 60% { transform: translateY(4px) rotate(10deg) scale(1.05); opacity: 1; } 100% { transform: none; } }
+  .die.locked { --dc: #9aa3b5; cursor: not-allowed; }
+  .die.locked::after { content: '⛓'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 26px; background: rgba(30,40,60,.35); border-radius: 9px; }
+  .die.stolen { --dc: #cdb6e8; cursor: not-allowed; opacity: .6; transform: rotate(12deg) scale(.9); }
+  .die.stolen::after { content: '🕸'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 30px; }
+  .die.flying { position: fixed; z-index: 90; pointer-events: none; margin: 0; }
+  .die.dragghost { position: fixed; z-index: 95; pointer-events: none; transform: translate(-50%, -50%) rotate(-8deg) scale(1.1); }
+  .die.in { width: 40px; height: 40px; border-radius: 10px; box-shadow: 0 2px 0 var(--ink); cursor: default; animation: land .25s cubic-bezier(.3,1.6,.5,1); }
+  @keyframes land { from { transform: scale(1.4); } }
+
+  /* player cards with dice sockets */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .pcard { background: var(--paper); color: var(--ink); border: 3px solid var(--ink); border-radius: 12px; box-shadow: 0 3px 0 var(--ink); padding: 4px 4px 5px; min-width: 0; position: relative; overflow: hidden; }
+  .pcard::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 22px; background: var(--sun); border-bottom: 2px solid var(--ink); }
+  .pcard.gk::before { background: #6fd36a; }
+  .pcard .phead { position: relative; display: flex; align-items: center; gap: 4px; height: 20px; margin: -2px 0 4px; }
+  .pcard .phead img { width: 30px; height: 30px; border-radius: 7px; border: 2px solid var(--ink); margin-top: 8px; position: relative; z-index: 1; }
+  .pcard .phead b { font-family: var(--font-h); font-weight: 400; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .socks { display: flex; gap: 4px; justify-content: center; margin-top: 8px; }
+  .sock { display: flex; flex-direction: column; align-items: center; cursor: pointer; width: 50%; max-width: 56px; min-width: 0; }
+  .sock .hole { position: relative; width: 46px; height: 46px; border-radius: 11px; border: 3px dashed rgba(27,27,47,.45); background: rgba(27,27,47,.08); display: grid; place-items: center; transition: transform .1s, background .1s; }
+  .sock .need { font-family: var(--font-h); font-size: 13px; opacity: .75; }
+  .sock .aname { font-size: 10px; font-weight: 900; text-align: center; line-height: 1.1; margin-top: 2px; }
+  .sock .aname small { display: block; font-size: 8.5px; opacity: .6; font-weight: 800; }
+  .sock.ok .hole { border: 3px solid var(--good); background: #d5f5cf; animation: okpulse .8s ease-in-out infinite alternate; }
+  @keyframes okpulse { to { transform: scale(1.06); box-shadow: 0 0 10px 2px rgba(46,158,79,.6); } }
+  .sock.no .hole { opacity: .45; }
+  .sock.off .hole { opacity: .35; }
+  .sock.used .hole { border-style: solid; border-color: var(--ink); background: #e8dcbc; }
+  .sock.nope .hole { animation: nope .3s; }
+  @keyframes nope { 25% { transform: translateX(-5px); background: #f8c9c4; } 75% { transform: translateX(5px); } }
+  .pv { position: absolute; top: -9px; right: -10px; font-family: var(--font-h); font-size: 11px; color: #fff; background: var(--navy); border: 2px solid var(--ink); border-radius: 99px; padding: 0 5px; white-space: nowrap; z-index: 2; }
+  .pv.odds-hi { background: var(--good); } .pv.odds-mid { background: var(--warn); } .pv.odds-lo { background: #e07a1f; } .pv.odds-vlo { background: var(--bad); }
+  .ups { display: flex; gap: 5px; flex-wrap: wrap; }
+  @media (max-width: 480px) { .die { width: 42px; height: 42px; border-radius: 10px; } .dice { gap: 5px; } .tray { padding: 6px; gap: 6px; } .tray .btn { padding: 8px 10px; font-size: 15px; } }
+  @media (max-width: 360px) { .sock .hole { width: 40px; height: 40px; } .die { width: 38px; height: 38px; } }
+</style>
+</head>
+<body>
+<script type="module" src="game.js"></script>
+</body>
+</html>

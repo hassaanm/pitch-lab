@@ -50,11 +50,13 @@
   .hud .sbar.low i { background: var(--bad); }
   .hud.them { top: 6px; left: 6px; }
   .hud.you { bottom: 6px; right: 6px; }
+  .hud.you.kd { right: auto; left: 6px; }
   .tell {
     position: absolute; top: 58px; left: 6px; max-width: 52%; display: flex; gap: 6px; align-items: center;
     background: #fff; color: var(--ink); border: 2.5px solid var(--ink); border-radius: 12px; padding: 4px 8px; font-size: 13px; font-weight: 900; line-height: 1.15;
     animation: tellIn .3s cubic-bezier(.2,1.5,.4,1);
   }
+  .tell[hidden] { display: none; }
   .tell::after { content: ''; position: absolute; right: -9px; top: 12px; border: 7px solid transparent; border-left-color: var(--ink); }
   .tell .ti { font-size: 18px; }
   .tell small { display: block; font-size: 9.5px; opacity: .55; font-weight: 800; }
@@ -104,6 +106,7 @@
   .tc-arrows span.bad { opacity: 1; background: var(--red); color: #fff; }
   .tc-timer { height: 10px; border: 2px solid var(--ink); border-radius: 6px; margin-top: 10px; background: #0b0f1d; overflow: hidden; }
   .tc-timer i { display: block; height: 100%; background: var(--sun); }
+  .tc-dirs { position: absolute; inset: 0; pointer-events: none; }
   .tc-dirs b { position: fixed; font-size: 30px; color: rgba(255,255,255,.22); pointer-events: none; }
   .tc-dirs .u { top: 12vh; left: 50%; transform: translateX(-50%); } .tc-dirs .d { bottom: 6vh; left: 50%; transform: translateX(-50%); }
   .tc-dirs .l { left: 4vw; top: 50%; } .tc-dirs .r { right: 4vw; top: 50%; }

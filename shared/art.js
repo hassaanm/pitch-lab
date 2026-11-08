@@ -517,7 +517,7 @@ export function portraitCanvas(c, size = 96, o = {}) {
   return cv;
 }
 export function portrait(c, size = 96, o = {}) {
-  const key = c.id + size + (o.pose || '');
+  const key = c.id + c.team + size + (o.pose || '');
   if (!portraitCache.has(key)) portraitCache.set(key, portraitCanvas(c, size, o).toDataURL());
   return portraitCache.get(key);
 }
@@ -525,7 +525,7 @@ export function portrait(c, size = 96, o = {}) {
 // Full-body sprite as an image (for cards / DOM).
 const spriteCache = new Map();
 export function spriteURL(c, size = 80, pose = 'idle') {
-  const key = c.id + size + pose;
+  const key = c.id + c.team + size + pose;
   if (!spriteCache.has(key)) {
     const cv = document.createElement('canvas');
     const w = size * 0.8, h = size * 1.1;

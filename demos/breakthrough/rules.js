@@ -285,6 +285,35 @@ export function stateKey(s) {
   return k;
 }
 
+// Cells from which a shot would beat the keeper where he stands now
+// (ignores bodies in the lane). Used for the gold "shoot from here" tint.
+export function openScoringCells(s) {
+  const keeper = s.def.find((d) => d.type === 'keeper');
+  const out = [];
+  for (let y = 0; y < ZONE; y++) for (let x = 0; x < W; x++) {
+    for (const dx of [0, -1, 1]) {
+      const gx = x + dx * (y + 1), cx = x + dx * y;
+      if (gx < GOAL_L || gx > GOAL_R || cx < GOAL_L || cx > GOAL_R) continue;
+      if (keeper && Math.abs(cx - keeper.x) <= 1) continue;
+      out.push({ x, y }); break;
+    }
+  }
+  return out;
+}
+
+// Solver prune (admissible): on the last turn, someone who can still get the
+// ball must still be able to reach an open scoring cell.
+function couldStillScore(s) {
+  if (s.turn < s.turns) return true;
+  const cells = openScoringCells(s);
+  if (!cells.length) return false;
+  return s.att.some((a, j) => {
+    if (j !== s.ball && s.passUsed) return false;
+    const reach = a.moved ? 0 : 2;
+    return cells.some((c) => cheb(a, c) <= reach);
+  });
+}
+
 // 0-1 BFS: minimum number of actions (move/pass/shoot cost 1, end turn free).
 export function solve(p, { maxStates = 3e6 } = {}) {
   const s0 = initState(p);
@@ -302,6 +331,7 @@ export function solve(p, { maxStates = 3e6 } = {}) {
       if (!r) continue;
       if (r.state.status === 'won') return { solved: true, par: cost + 1, path: unwind(node, a), turns: r.state.turn, states };
       if (r.state.status !== 'play') continue;
+      if (!couldStillScore(r.state)) continue;
       const c = a.t === 'end' ? cost : cost + 1;
       const k = stateKey(r.state);
       if ((seen.get(k) ?? Infinity) <= c) continue;

@@ -62,7 +62,7 @@ export class Shell {
     window.addEventListener('pointerdown', unlock, { once: true });
     window.addEventListener('keydown', (e) => {
       unlock();
-      if (e.target.closest('input,textarea')) return;
+      if (e.target?.closest?.('input,textarea')) return;
       if (e.key === 'h' || e.key === '?') this.showHelp();
       if (e.key === 'm') mute.click();
       if (e.key === 'l') this.logPanel.classList.toggle('collapsed');

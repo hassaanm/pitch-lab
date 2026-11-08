@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shootout Minds · Pitch Lab</title>
+<link rel="stylesheet" href="../../shared/ui.css">
+<style>
+  .so { display: flex; flex-direction: column; gap: 8px; max-width: 620px; margin: 0 auto; }
+  .tally { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
+  .trows { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .trow { display: flex; align-items: center; gap: 6px; }
+  .trow b { font-family: var(--font-h); font-weight: 400; font-size: 18px; color: var(--sun); min-width: 14px; text-align: center; }
+  .pips { display: flex; gap: 4px; flex-wrap: wrap; }
+  .pip { width: 20px; height: 20px; border-radius: 50%; border: 2px solid rgba(255,255,255,.3); display: grid; place-items: center; font-style: normal; font-size: 11px; font-weight: 900; }
+  .pip.goal { background: var(--good); border-color: var(--ink); color: #fff; animation: pipIn .35s cubic-bezier(.2,1.6,.4,1); }
+  .pip.save, .pip.miss { background: var(--bad); border-color: var(--ink); color: #fff; animation: pipIn .35s cubic-bezier(.2,1.6,.4,1); }
+  @keyframes pipIn { from { transform: scale(.2); } }
+  .round { text-align: right; line-height: 1.1; }
+  .round b { font-family: var(--font-h); font-weight: 400; font-size: 17px; display: block; color: var(--sun); }
+  .round span { font-size: 11px; opacity: .7; }
+
+  .scene { position: relative; border: 3px solid var(--ink); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); background: #22305a; }
+  .scene canvas { width: 100%; height: auto; }
+  .cells { position: absolute; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); gap: 3px; padding: 3px; }
+  .cell {
+    position: relative; border: 2px dashed rgba(255,255,255,.45); border-radius: 8px; background: rgba(255,255,255,.06);
+    cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 0; min-height: 40px;
+    transition: background .2s, transform .1s;
+  }
+  .cell:hover { background: rgba(255,255,255,.16); }
+  .cell.sel { border: 3px solid var(--sun); background: rgba(255,210,63,.25); box-shadow: 0 0 0 2px var(--ink), inset 0 0 12px rgba(255,210,63,.6); transform: scale(1.03); }
+  .cell .odds { font-size: 12.5px; padding: 0 6px; }
+  .cell small { font-size: 10px; font-weight: 900; color: #fff; text-shadow: 0 1px 0 #000; }
+  .bubble {
+    position: absolute; left: 6px; bottom: 6px; max-width: 58%; display: flex; gap: 6px; align-items: center;
+    background: #fff; color: var(--ink); border: 2.5px solid var(--ink); border-radius: 12px; padding: 4px 8px; font-size: 12.5px; font-weight: 800; line-height: 1.2;
+  }
+  .bubble[hidden] { display: none; }
+  .bubble.pop { animation: pop .3s cubic-bezier(.2,1.5,.4,1); }
+  .bubble .ti { font-size: 20px; }
+  .bubble small { display: block; font-size: 9.5px; opacity: .55; }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } }
+  .who {
+    position: absolute; right: 6px; bottom: 6px; display: flex; gap: 6px; align-items: center; max-width: 46%;
+    background: rgba(255,246,224,.94); color: var(--ink); border: 2.5px solid var(--ink); border-radius: 10px; padding: 3px 7px 3px 3px; font-size: 13px; line-height: 1.1;
+  }
+  .who:empty { display: none; }
+  .who img { width: 34px; height: 34px; border-radius: 8px; border: 2px solid var(--ink); background: #ffe680; flex: none; }
+  .who b { font-family: var(--font-h); font-weight: 400; font-size: 14px; }
+  .who small { display: block; font-size: 9.5px; font-weight: 800; opacity: .7; }
+
+  .ctl { padding: 8px; display: flex; flex-direction: column; gap: 7px; }
+  .oddsline { font-size: 12.5px; line-height: 1.3; display: flex; flex-direction: column; gap: 3px; min-height: 40px; }
+  .oddsline .ol2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-weight: 900; }
+  .oddsline .muted { font-size: 11px; color: #6a6f8a; }
+  .sm-actions { display: flex; gap: 6px; align-items: center; min-height: 46px; }
+  .sm-actions .seg { display: flex; gap: 4px; }
+  .sm-actions .btn.small { min-height: 42px; }
+  .sm-actions .icon { min-width: 42px; font-size: 17px; }
+  .sm-actions .go { margin-left: auto; min-height: 46px; font-size: 19px; padding: 6px 14px; }
+  .sm-actions .hint { font-size: 12px; flex: 1; text-align: center; }
+  .sm-actions .wait { flex: 1; text-align: center; font-family: var(--font-h); opacity: .5; }
+
+  .nbk table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 4px 0 8px; }
+  .nbk th, .nbk td { border: 1.5px solid rgba(27,27,47,.25); padding: 3px 6px; text-align: center; }
+  .nbk td:first-child { text-align: left; font-weight: 900; }
+  .nbgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; border: 4px solid var(--ink); border-bottom: 0; padding: 3px; border-radius: 6px 6px 0 0; background: #e8f3e3; margin: 6px 0; }
+  .nbgrid i { font-style: normal; text-align: center; padding: 8px 0; border-radius: 5px; font-family: var(--font-h); color: var(--ink); }
+  .nbk p { font-size: 14px; margin: 6px 0; }
+  .nbl { font-size: 13px; padding-left: 18px; margin: 6px 0; }
+
+  @media (max-width: 400px) {
+    .sm-actions .btn.small { padding: 5px 8px; font-size: 13px; }
+    .sm-actions .go { font-size: 17px; padding: 6px 10px; }
+    .sm-actions .key { display: none; }
+  }
+</style>
+</head>
+<body>
+<script type="module" src="game.js"></script>
+</body>
+</html>

@@ -249,7 +249,7 @@ const btnPlay = $('[data-a=play]'), btnEnd = $('[data-a=end]'), btnUndo = $('[da
 let ctx, pitch, W = 360, H = 240;
 function sizeCanvas() {
   W = Math.min(fieldEl.clientWidth - 6 || 360, 560);
-  H = Math.round(clamp(W * 0.68, 230, 330));
+  H = Math.round(clamp(W * 0.68, 230, 290));
   ctx = setupCanvas(cv, W, H);
   const variant = pitch?.variant || 'day';
   pitch = new Pitch(W, H, { variant });

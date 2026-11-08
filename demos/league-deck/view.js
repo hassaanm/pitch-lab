@@ -275,6 +275,7 @@ export class MatchView {
 
   // ---- render loop
   frame(now) {
+    if (!this.running) return;
     let dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     if (!this.ctx) { requestAnimationFrame((t) => this.frame(t)); return; }

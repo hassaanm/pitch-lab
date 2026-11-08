@@ -1,0 +1,10 @@
+# Command Duel × Timed Strikes: notes
+
+**Rules as built:** the ball moves Own box → Defense → Midfield → Attack → Box. Each zone is a 1v1 vs a named Redrock defender. You pick Dribble / Pass (2 receivers) / Shoot (Attack and Box only) / Special (40 guts) / a combo (60 guts: Kenji→Rio "Golden Thread", Pip→Bruno "Pinball Ram"). The defender has secretly picked Tackle (beats Dribble), Mark (beats Pass) or Press (−2.5 stamina, small penalty to everything).
+**Reading:** each defender has a stated, true habit (Hans tackles when guts < 40, Nils counters your last move, Marisol marks after a pass, Zed presses tired carriers, Rocco gambles). The tell bubble is honest 70% of the time. The "Read" bar and every % are the exact Bayesian odds: habit prior × tell reliability.
+**Timing check (⏱, key T):** pass = stop a slider in the green, dribble = 3-arrow sequence, shot = fast slider, save = shrinking ring. Perfect +15% (and +10 guts), Miss −20%. With ⏱ OFF, every action uses the shown %.
+**Defending:** Tackle / Mark / Press vs the carrier's hidden Dribble / Pass / Shoot. Then Wak picks Catch / Punch / Dive vs Normal / Power / Placed (or Brick Wall for 50 guts). Clock: +3 min per duel, so a match is about 30 duels (~6 min).
+**Core decision each turn:** "Which response is this defender most likely hiding, and is my best counter worth the risk, or do I spend guts to skip the guess?"
+**Where the fun is:** the habit notes. Having Hans tackle *because* you just spent guts makes you plan two turns ahead. Combos at full guts feel great with the cut-ins.
+**Where it isn't (honest):** the tell at 70% plus one habit usually produces a 60–70% favourite, so many turns are "press the green button". The bot test drew 1–1 twice: random play scores rarely. The timing check has a bigger swing (+15/−20) than most reads, so with ⏱ ON your thumb matters more than your read. That may be the answer to the design question. The arrow sequence is the weakest check on touch (tap a screen side).
+**Untested on a real iPhone.** Verified at 390×750 in headless Chromium and at desktop width.

@@ -26,6 +26,7 @@
   color-scheme: dark;
 }
 
+[hidden] { display: none !important; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; padding: 0; }
 body {
@@ -162,6 +163,7 @@ a { color: var(--sun); }
   white-space: nowrap;
 }
 .banner small { display: block; font-size: 20px; color: #fff; -webkit-text-stroke: 2px var(--ink); text-shadow: 0 3px 0 var(--ink); }
+@media (max-width: 480px) { .banner { font-size: 44px; } .banner small { font-size: 16px; } .cutin .stripe { padding-left: 6%; } .cutin img { width: 110px; height: 110px; } .cutin .ctext { font-size: 28px; } }
 @keyframes bannerIn {
   0% { transform: translate(-50%, -50%) scale(.2) rotate(-8deg); opacity: 0; }
   20% { transform: translate(-50%, -50%) scale(1.15) rotate(2deg); opacity: 1; }

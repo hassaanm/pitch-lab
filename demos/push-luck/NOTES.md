@@ -1,0 +1,8 @@
+# Push Your Luck — notes
+- **Rules as built:** each possession you see 3 random options from Safe, Recycle, Progressive, Line-breaker, Switch, Take-on. Each shows turnover risk and xG gain. Risk = base + 0.3×pressure + a bit for field position. Every action adds 🔥 pressure (Recycle and Switch remove it). 5 completed passes = +0.08 xG. Shoot any time: goal chance ≈ built xG. Turnover = xG lost + a Redrock counter.
+- **Rival possessions** auto-play (2–3 animated passes), then you make one defensive call with visible odds: Press (win-back % or a worse chance), Hold Shape, Deep Block (lower chance, you restart deep), Tactical Foul on counters (2 yellows max).
+- **Match:** 2' per action, 4–6' per rival possession, ~10 possessions a match. Rerolls ↻ are the scarce resource (1 / 3 / 2 by phase). Clutch: 88'–90+3', 1–2 down, pressure starts at 30.
+- **Named players toggle (N):** passer's pass stat / carrier's dribble stat scale risk; Kenji Line-breakers and Pip Take-ons get −40%; shooter's stat scales the shot (Rio best). Off = pure dice.
+- **Core decision:** "shoot at 24% now, or one more 25%-risk pass for +0.09?" — and when to spend a pass on Recycle to cool pressure (patience vs. greed).
+- **Where the fun is:** the 4th–5th pass of a good chain is genuinely tense, and the chain bonus makes Safe/Recycle feel like a real choice. Named mode helps a lot: "give it to Pip" becomes a plan, not a dice roll.
+- **Where it isn't:** with 3 random offers, the optimal line is often obvious (take the lowest risk/gain ratio, shoot ≥0.25). Across a full match it starts to feel samey after ~6 possessions; rival possessions are one click and a bit passive. Needs opponent-specific twists (a high line that punishes Line-breakers less, etc.) to hold a whole match.

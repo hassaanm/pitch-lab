@@ -1,0 +1,8 @@
+# Auto XI — notes
+**Rules as built:** 5-match cup run, 10 hearts. Shop of 5 (1–3 gold by tier; odds improve with level). Reroll 1g, level up 4–6g for 3→6 outfield slots, 5 bench slots, sell for full refund. Three copies of a player combine into ★★ (×1.45 stats).
+Traits count unique players: styles (Possession, Gegenpress, Catenaccio, Intensity, Flair) tier at 2/4/6, roles (Engine, Playmaker, Poacher, Wall, Speedster) at 2/4.
+Placement matters: each role has a home line (60% out of position); Playmaker feeds the forward ahead, side-by-side Walls form a Partnership, Engines carry adjacent midfielders, Speedsters on a flank add Attack. No Engine pair = 2nd-half fade.
+Board → team stats (Control/Attack/Finish/Defence/Press/Keeper) → Touchline-style possession odds → 8 scripted possessions per half, animated with an adapted copy of Touchline's MatchView. W/D/L + xG projection updates live as you place. Half-time = +4 gold and a fresh shop. Loss costs 2 + margin hearts, draw 1. Final draws go to penalties.
+**Core decision each shop:** chase a trait tier vs. buy raw quality vs. save gold (interest) — and where on the board each player stands.
+**Where the fun is:** the live projection reacting to every move (swap two players, watch win% jump) and hitting a ★★ or a 4-tier. Scouting a Catenaccio-4 opponent and building to beat it feels like coaching.
+**Where it isn't:** the match itself is pure watching — once you hit Kick off you have zero input for ~40 seconds, and outcomes are low-scoring and swingy, so a good build can still lose 0–1 with no story. Pool is small (27 units), so rolls repeat; no opponent shop/adaptation at half-time; balance is hand-tuned, not tested over many runs.

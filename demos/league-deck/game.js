@@ -202,6 +202,7 @@ function matchScreen() {
       <button class="btn big" id="kick">Kick off ▶</button></div>
   </div>`;
   const cv = stage.querySelector('#pitch');
+  if (view) view.running = false;
   view = new MatchView(cv);
   fitPitch();
   window.onresize = () => fitPitch();

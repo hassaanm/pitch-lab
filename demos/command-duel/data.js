@@ -15,17 +15,17 @@ export const TELL_TRUTH = 0.7;
 export const DEF_TELL = {
   tackle: { icon: '⬇', text: 'Low stance, weight forward', why: 'the low stance' },
   mark: { icon: '👀', text: 'Glancing at {r}', why: 'the glance at your teammate' },
-  press: { icon: '💨', text: 'Bouncing on toes, closing in', why: 'the bouncing feet' },
+  press: { icon: '💨', text: 'Bouncing on toes, closing in', why: 'the bounce on the toes' },
 };
 export const ATT_TELL = {
   dribble: { icon: '🦶', text: 'Drops a shoulder', why: 'the dropped shoulder' },
   pass: { icon: '👀', text: 'Eyes on a teammate', why: 'the look at a teammate' },
-  shoot: { icon: '🎯', text: 'Sets his feet, looks at goal', why: 'the set feet' },
+  shoot: { icon: '🎯', text: 'Sets feet, looks at goal', why: 'the set-up to shoot' },
 };
 export const SHOT_TELL = {
-  normal: { icon: '👣', text: 'Short, tidy steps', why: 'the short steps' },
+  normal: { icon: '👣', text: 'Short, tidy steps', why: 'the short run-up' },
   power: { icon: '💥', text: 'Long run-up, head down', why: 'the long run-up' },
-  placed: { icon: '🎯', text: 'Opens hips to the corner', why: 'the open hips' },
+  placed: { icon: '🎯', text: 'Opens hips to the corner', why: 'the hip angle' },
 };
 
 // Rival defenders you meet while attacking, by zone. ctx = { sta, last, guts }.
