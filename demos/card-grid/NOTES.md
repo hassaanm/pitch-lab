@@ -5,3 +5,19 @@
 - **Core decision:** spend 3 energy to (a) progress the ball, (b) end the turn out of the ◎, and (c) set up a shot — usually you can only do two. On defence: which lane to cut so their chain's product drops most.
 - **Where the fun is:** defence is the surprise hit — watching "their goal chance 37% → 14%" as you slot Tomo into the run cell feels like coaching. Dodging the ◎ press is a clean Into-the-Breach puzzle.
 - **Where it isn't (yet):** attack hands can brick (no Shoot / carrier-locked character cards) — the restriction feels frustrating ~1 turn in 4. Dribble odds bubbles get cluttered. The AI is simple (1–2 pressers, greedy chain) and loses its threat once you learn to body-block runs. Goals are rare-ish in 10 turns; tune shot formula or turn count next.
+
+## Polish pass (no-jank contract)
+- **Ball handoffs are physical.** `view.give()` no longer snaps the ball to the new owner; it rolls there. Passes home onto the receiver's feet (`ballToUnit`), so through balls meet the runner as the run ends. `sync()` (undo, turn start) rolls the ball too.
+- **Tackles** (`contest()` in game.js): the tackler runs in, slides to the carrier's feet, and only at that contact frame do sound, label, shake and the outcome happen. If won, the ball pops off the carrier's foot to the tackler. Replaces `animTackle`, which handed the ball over across a cell gap.
+- **Interceptions** (`cutOut()`): the cutter is whoever is nearest the pass line; ball and cutter reach the same point on the line at the same time. Before, the ball flew straight to a defender who could be anywhere.
+- **Dribbles** (`runDribble()`): each lunge happens on the step where the carrier passes that defender, not after the run ends. Same odds, each defender still rolls once. A dribble into an occupied lane is now won by the player standing in it (not "nearest Sunbird").
+- **Shots:** keeper dive direction fixed (the dive pose lies toward -facing, so he dived away from the ball). Saves send ball and gloves to the same point on the same frame. Wide shots come back to the keeper for a goal kick instead of teleporting.
+- **Goals:** players jog back to kick-off shape while the ball is fetched to the taker (was an instant reset).
+- **Offside:** the pass arrives, then the whistle, then the ball is rolled to the free-kick taker.
+- **Cards:** the played card flies from the hand to where it takes effect.
+- **Mechanics:** an attack hand always holds at least one playable ball-moving card (pass, through ball or dribble); a dead card is swapped out at the draw. Fixes the "bricked hand" turn.
+- **UI:** hint lines shortened so they fit one line at 375px; hand fits at 375px; badge says "Full time" at the end; no "Hand empty" text during animations.
+- **Review fixes:** a player who loses a press is dazed 💫 (faded, slumped) until the turn ends and is no longer offered for cards (`cardActors` filters `u.beaten`; the log and How-to say so). The half-time reward waits for the How-to sheet to close. Phone cards are 73 px so the hand fits at 390 px.
+- **Pace tuning (goals were rare):** energy ⚡4 (⚡5 in the second-half phase); shot = (shoot/10)·(1.25 − 0.15·dist), blockers −10 each; tackle odds ×0.95 (was ×1.1); Redrock only take long shots above 12%. Bot matches at ×1 went from ~1–2 shots and 0–1 goals to ~2–4 shots and 0–3 goals.
+- **Dribble no longer a free 100%:** with a defender within 3 of the end cell, keep odds cap at 90%; the miss is a heavy touch the nearest defender runs onto. **Switch Play** reaches anyone 2+ columns across at any range (was 3+ within 7), so it is rarely dead.
+- Testing aid: with `?jank=1`, `window.__slow = 0.25` slows the pitch clock; `window.cardGrid.view` is exposed.

@@ -19,12 +19,12 @@ export function carrier(G) { return G.units.find((u) => u.id === G.ball.owner) |
 export function ballPos(G) { const c = carrier(G); return c ? { x: c.x, y: c.y } : { x: G.ball.x, y: G.ball.y }; }
 export const inGrid = (x, y) => x >= 0 && x < COLS && y >= 0 && y < ROWS;
 
-// Move range from pace: 4-5 -> 2, 6-9 -> 3, 10 -> 4. Carrying the ball costs 1
-// unless dribble is 8+.
+// Move range from pace: 4-5 -> 2, 6-9 -> 3, 10 -> 4. A great dribbler (8+)
+// moves 1 further with the ball.
 export function moveRange(G, u) {
   const s = stats(u);
   let r = 1 + Math.round(s.pace / 4);
-  if (G.ball.owner === u.id && s.dribble < 8) r -= 1;
+  if (G.ball.owner === u.id && s.dribble >= 8) r += 1;
   return Math.max(1, r);
 }
 
@@ -33,7 +33,8 @@ function inOwnBox(u, x, y) {
   return x >= 1 && x <= 5 && (u.team === 'sun' ? y >= 8 : y <= 2);
 }
 
-// Cells next to an enemy (8-neighbour). Entering one ends your move.
+// Cells next to an enemy (8-neighbour). Entering one ends your move, unless
+// you have the ball: a carrier may dribble past (but risks a standing tackle).
 export function zoc(G, team) {
   const s = new Set();
   for (const e of G.units) {
@@ -60,7 +61,7 @@ export function reach(G, u) {
         const x = c.x + dx, y = c.y + dy, kk = k(x, y);
         if (!inGrid(x, y) || seen.has(kk) || unitAt(G, x, y) || !inOwnBox(u, x, y)) continue;
         seen.add(kk);
-        const cell = { x, y, path: [...c.path, { x, y }], stopped: z.has(kk) };
+        const cell = { x, y, path: [...c.path, { x, y }], stopped: z.has(kk) && G.ball.owner !== u.id };
         out.set(kk, cell);
         const pickup = loose && loose.x === x && loose.y === y;
         if (!cell.stopped && !pickup) next.push(cell);
@@ -110,20 +111,34 @@ export function passOdds(G, from, to, { needle = false } = {}) {
   return { p, dist, interceptors: needle ? [] : interceptors.map((i) => i.u), offside, recv, skill };
 }
 
-// Shot ≈ (shoot/10)·(1.15 − 0.17·dist) − keeper set − 0.12 per adjacent defender.
+// Shot ≈ (shoot/10) · reach(dist) · angle − keeper set − 0.12 per adjacent defender.
+// reach() falls off steeply past ~4 squares (0.80 at 2, 0.48 at 4, 0.13 at 5.5),
+// and angle is how much of the goal mouth you can see (posts at x = 1.5 and 4.5),
+// relative to a central shot from the edge of the box, floored at 0.2.
+export const shotReach = (d) => 0.85 / (1 + Math.exp((d - 4.2) * 1.3));
+export function shotAngle(u) {
+  const gy = u.team === 'sun' ? -0.5 : ROWS - 0.5;
+  const dy = Math.max(0.3, Math.abs(u.y - gy));
+  const th = Math.abs(Math.atan2(GOAL_C + 1.5 - u.x, dy) - Math.atan2(GOAL_C - 1.5 - u.x, dy));
+  return clamp(th / 0.9, 0.2, 1);
+}
 export function shotOdds(G, u, { eagle = false } = {}) {
   const s = stats(u);
   const gy = u.team === 'sun' ? -0.5 : ROWS - 0.5;
   const dist = Math.hypot(u.x - GOAL_C, u.y - gy);
+  const angle = shotAngle(u);
   const gk = G.units.find((e) => e.team !== u.team && e.role === 'GK');
   const lineRows = u.team === 'sun' ? [0, 1] : [ROWS - 2, ROWS - 1];
   const keeperSet = !!gk && !gk.dazed && lineRows.includes(gk.y) && Math.abs(gk.x - GOAL_C) <= 1;
   const keeperPen = keeperSet ? 0.10 + (byId[gk.id].stats.keep - 7) * 0.02 : 0;
   const pressure = G.units.filter((e) => e.team !== u.team && e.role !== 'GK' && cheb(e, u) <= 1).length;
-  let p = (s.shoot / 10) * (1.15 - 0.17 * dist) - keeperPen - 0.12 * pressure + (eagle ? 0.2 : 0);
+  let p = (s.shoot / 10) * shotReach(dist) * angle - keeperPen - 0.12 * pressure + (eagle ? 0.2 : 0);
   p = clamp(p, 0.03, 0.85);
-  return { p, dist, keeperSet, keeperPen, pressure, gk };
+  return { p, dist, angle, keeperSet, keeperPen, pressure, gk };
 }
+
+// A tackle is a standing challenge: only a player who has not moved this turn.
+export const canTackle = (u, c) => !!c && c.team !== u.team && !u.moved && !u.acted && !u.dazed && cheb(u, c) <= 1;
 
 export function tackleOdds(tackler, target) {
   const a = stats(tackler).tackle, b = stats(target).dribble;
@@ -201,7 +216,9 @@ export function aiPlan(G, u) {
     return { move: bestCellToward(G, u, slot, open), act: null, why: 'support' };
   }
 
-  // Their ball: one presser, one lane-cover, the rest hold shape.
+  // Their ball: one presser, one lane-cover, the rest hold shape. A tackle needs
+// a defender who starts his turn next to the carrier: the presser steps in
+// this turn and can only tackle next turn, so the carrier gets a chance to react.
   const outfield = G.units.filter((o) => o.team === team && o.role !== 'GK' && !o.dazed);
   const byDist = [...outfield].sort((a, b) => cheb(a, c) - cheb(b, c) || progress(b.y) - progress(a.y));
   const presser = byDist[0];
@@ -212,7 +229,7 @@ export function aiPlan(G, u) {
     if (adj.length) {
       adj.sort((a, b) => progress(b.y) - progress(a.y));
       const goalSide = adj.sort((a, b) => (down ? a.y - b.y : b.y - a.y))[0];
-      return { move: goalSide, act: { t: 'tackle', target: c }, why: 'press' };
+      return { move: goalSide, act: null, why: 'press' };
     }
     return { move: bestCellToward(G, u, c), act: null, why: 'press' };
   }
@@ -243,7 +260,7 @@ function carrierPlan(G, u) {
     const so = shotOdds(sim, sim.units.find((o) => o.id === u.id));
     if (!bestShot || so.p > bestShot.p) bestShot = { p: so.p, cell };
   }
-  if (bestShot && bestShot.p >= 0.3) return { move: bestShot.cell === here ? null : bestShot.cell, act: { t: 'shoot' }, why: `shot ${Math.round(bestShot.p * 100)}%` };
+  if (bestShot && bestShot.p >= 0.18) return { move: bestShot.cell === here ? null : bestShot.cell, act: { t: 'shoot' }, why: `shot ${Math.round(bestShot.p * 100)}%` };
   // 2. pass forward if it is safe enough
   const mates = G.units.filter((o) => o.team === u.team && o !== u && o.role !== 'GK');
   let bestPass = null;
@@ -264,13 +281,19 @@ function carrierPlan(G, u) {
     const v = progress(cell.y) * 1.0 - pressure(cell) * 2.2 - Math.abs(cell.x - GOAL_C) * 0.15;
     if (v > bv) { bv = v; best = cell; }
   }
-  return { move: best === here ? null : best, act: { t: 'after-dribble' }, why: 'dribble' };
+  if (best !== here) return { move: best, act: { t: 'after-dribble' }, why: 'dribble' };
+  // 4. Boxed in: recycle the ball sideways or back instead of standing still,
+  // so a passive defence still has to react every turn.
+  if (bestPass && bestPass.po.p >= 0.6 && bestPass.gain >= -2) {
+    return { move: null, act: { t: 'pass', to: { x: bestPass.m.x, y: bestPass.m.y } }, why: 'pass' };
+  }
+  return { move: null, act: { t: 'after-dribble' }, why: 'dribble' };
 }
 
 // After a dribble, decide whether to shoot or pass from the new cell.
 export function afterDribble(G, u) {
   const so = shotOdds(G, u);
-  if (so.p >= 0.24) return { t: 'shoot' };
+  if (so.p >= 0.18) return { t: 'shoot' };
   const down = u.team === 'red';
   const progress = (y) => (down ? y : ROWS - 1 - y);
   const mates = G.units.filter((o) => o.team === u.team && o !== u && o.role !== 'GK');

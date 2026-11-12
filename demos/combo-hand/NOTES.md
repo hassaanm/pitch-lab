@@ -6,3 +6,18 @@
 - **Core decision:** pure poker hand vs. adding "filler" players from other lines to make links/chains — which fights Catenaccio (≤3 cards) and Full Line (all one line = zero links).
 - **Where the fun is:** the clutch phase puzzle (3 nines + Catenaccio vs. adding the GK for a chain vs. adding a FW for Target Man) feels genuinely football-shaped. Watching the ball run the chain into the net sells it.
 - **Where it isn't (honest):** Build-up (DF+MF+FW) is easy to hit and links make 5-card plays almost always best, so hand choice flattens. Numbers inflate fast with stacked coaches; tier targets are hand-tuned for the authored phases, not for a real run.
+
+## Polish pass
+- **Board is actors, not snapshots.** Every sprite tweens or eases (speed-capped) to its spot and fades in/out; ghost previews glide when a pick re-spaces a line.
+- **Cards land, then players solidify** on the landing frame of each flying card.
+- **Scoring is played out.** The ball is passed to each scorer and `+chips` pops on arrival; links go dashed → solid as they fire; the chain passes back to the GK and up before the ×2.
+- **Every play ends with a shot at Big Oskar.** Goal only if the total crosses the next ⚽ line. Goal: he dives the wrong way and stays down; GOAL, bar, flame, score fire on the net frame. Save: he goes down as he travels (`lay` 0→1), the ball meets his low glove (point derived from the `dive` geometry in `shared/art.js`, both facings, through the whole `lay` motion), he holds 0.4 s, then gets up (`lay` 1→0) with the ball raised in his gloves. Hans's slide tackle uses `lay` too. The bar only moves on the net/save frame and uses a fixed scale, so it never shrinks.
+- **Man-marking is visible.** Iron Hans waits beside the marked (rightmost) card, crouches, slide-tackles in; "Marked! +0" fires on his arrival.
+- **VAR** counts to full, then visibly counts down to half.
+- **Penalties** are one deciding kick on the pitch (Rio vs Oskar, 50%); the loss modal says it went to penalties.
+- **Clear and deal:** players, ball, Hans fade together; Oskar jogs back; keyed hand DOM so picks lift and the hand slides; discards drop out.
+- **Messages** (coach info, max 5, no discards, VAR) go in the fixed strip under the pitch, never over the buttons; shop errors are an inline line.
+- **Phone layout:** coach row height reserved from the start; rows moved so FWs clear the keeper; flatter hand fan so no card is clipped at 375/390; fits 375×812.
+- **Phase tabs** follow the match being played (Group → Knockout → Final, Play again).
+- **Mechanics (tuned by a full-run sim with shop money and coaches, 2000 runs per bot):** Build-up 25×3 → 25×2. Score to go through / win: Group 800 / 1600 (a goal every 800), Knockout 1875 (every 625), Final 4500 (every 1500). **One play scores at most one goal** (its total is capped at one goal's worth), which removes the rare 1400+ spikes that decided matches. **4 discards, and a discard draws one extra card** (hold up to 9), so discarding is strong. Never-discard bot: Group 81% · Knockout 50% · Final 39%. Discard-when-below-need bot: 100% · 85% · 53%. (Previous round: 72/39/29 vs 97/61/39; original: 100/97/89 vs 100/100/98.) Strip shows "need X/play to go through · Y to win" in the Group and drops its least useful chips rather than clip. Banners and logs state the score to win. Presets: Knockout 1–2 down (700 of 1875, 2 plays), Final 1–2 down (1800 of 4500, 2 plays): each needs two strong plays and usually a discard.
+- Test aid: `?jank=1` exposes `window.__slow` and keeps the board ticking from a timer when rAF is paused.

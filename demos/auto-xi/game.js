@@ -5,9 +5,9 @@ import { Shell, oddsPill, pick } from '../../shared/shell.js';
 import { spriteURL, portrait } from '../../shared/art.js';
 import { sfx } from '../../shared/sfx.js';
 import { byId, TEAMS, crestSVG } from '../../shared/cast.js';
-import { TRAITS, UNITS, UNIT, ROUNDS, SHOP_ODDS, LEVEL_COST, MAX_SLOTS, BENCH, HP_MAX, LINE_NAME, ROLE_LINE } from './data.js';
+import { TRAITS, UNITS, UNIT, ROUNDS, SHOP_ODDS, LEVEL_COST, MAX_SLOTS, BENCH, HP_MAX, LINE_NAME, ROLE_LINE, slotUV } from './data.js';
 import * as S from './sim.js';
-import { MatchView } from './view.js';
+import { MatchView } from '../../shared/matchview.js';
 
 const shell = new Shell({
   id: 'auto-xi',
@@ -18,9 +18,12 @@ const shell = new Shell({
     'Tap a player, then tap a slot to place or swap. Drag works with a mouse. Drop on the shop or press Del to sell.',
     'Traits stack: 2/4/6 Possession, Gegenpress, Catenaccio, Intensity, Flair; 2/4 Engine, Playmaker, Poacher, Wall, Speedster.',
     'Lines matter: Walls at the back, Engines and Playmakers in midfield, Poachers up front. A Playmaker feeds the forward ahead; two Walls side by side are a Partnership.',
-    'Check the projection (win/draw/loss and xG), then kick off. At half-time you shop again.',
+    'Without an Engine pair (2 Engines on the board) your team tires in the 2nd half: −0.8 Attack, −1.2 Press.',
+    'Check the projection (win/draw/loss and xG): it is the exact chance of each result from the same odds the match rolls. Then kick off.',
+    'The half plays itself. Each tackle, block, save or goal names the synergy or link that caused it (e.g. "🤝 Dima+Tomo → BLOCKED!"), but only if that player (both players, for a link) took part. A coloured dot shows whose player each name is.',
+    'Half-time is a shop: +4 gold, a fresh shop, and a one-line summary of what decided the half (tap Why ▸ for all of it). Fix what went wrong.',
     'Five matches. Losses cost hearts. Win the Final to lift the Cup.',
-    'Keys: 1–5 buy · R reroll · F level up · QWE/ASD/ZXC board slots · 6–0 bench · Del sell · Enter kick off.',
+    'Keys: 1–5 buy · R reroll · F level up · QWE/ASD/ZXC board slots · 6–0 bench · Del sell · Enter kick off · Space fast-forwards the match.',
   ],
   notice: 'Is building the squad and watching it play enough agency, or do you want to step in during the match?',
   phases: [
@@ -37,6 +40,10 @@ let sel = null;          // { where: 'board'|'bench', i }
 let view = null;
 let busy = false;
 let uidSeq = 1;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function killView() { if (view) { view.destroy(); view = null; } }
+// Key names appear only where there is a keyboard (a fine pointer that can hover).
+const KB = (() => { try { return matchMedia('(hover: hover)').matches; } catch { return true; } })();
 const BOARD_KEYS = ['q', 'w', 'e', 'a', 's', 'd', 'z', 'x', 'c'];
 const BENCH_KEYS = ['6', '7', '8', '9', '0'];
 const POS_OF = ['FW', 'FW', 'FW', 'MF', 'MF', 'MF', 'DF', 'DF', 'DF'];
@@ -47,8 +54,8 @@ function benchFrom(list) { const b = Array(BENCH).fill(null); list.forEach((id, 
 
 // ================================================================ phases
 function startPhase(id) {
-  busy = false; sel = null;
-  if (view) view.running = false;
+  busy = false; sel = null; report = null;
+  killView();
   if (id === 'early') {
     run = { round: 0, hp: HP_MAX, gold: 6, slots: 3, streak: 0, half: 1, score: [0, 0],
       board: boardFrom([['tomo', 7], ['bruno', 1]]), bench: benchFrom(['g_lola']), shop: [] };
@@ -69,7 +76,7 @@ function startPhase(id) {
     shell.log('The Final under the lights. Paris St-Germane lead 1–0 at the break. Flair 4 is cutting you open.', 'info', "45'");
     shell.log('Two Sols on the bench — a third makes ★★.', 'info', 'HT');
   }
-  draftScreen();
+  draftScreen(true);
 }
 
 // ================================================================ helpers
@@ -77,16 +84,28 @@ const R = () => ROUNDS[run.round];
 const oppSide = () => ({ board: oppBoard(), keeper: R().keeper });
 const youSide = () => ({ board: run.board, keeper: byId.wak.stats.keep });
 let oppCache = null;
+// A rival player who is also on your board plays under another name and look,
+// so both sides never field the same character (same stats and traits).
+const ALT = ['Dario', 'Toni', 'Luka', 'Remy', 'Ivan', 'Otto', 'Basti', 'Nico', 'Joel', 'Marco', 'Fede', 'Kasper'];
+const ALT_HAIR = ['#1A1110', '#6B4A2E', '#C8572B', '#E9D8A6', '#2A1810', '#111'];
 function oppBoard() {
   if (!oppCache || oppCache.round !== run.round) oppCache = { round: run.round, board: boardFrom(R().squad) };
+  const mine = new Set(run.board.filter(Boolean).map((p) => p.id));
+  oppCache.board.forEach((p, i) => {
+    if (!p) return;
+    if (!mine.has(p.id)) { delete p.name; delete p.look; return; }
+    const h = [...p.id].reduce((a, ch) => a + ch.charCodeAt(0), 0) + run.round + i;
+    p.name = ALT[h % ALT.length];
+    p.look = { hairColor: ALT_HAIR[h % ALT_HAIR.length], num: 2 + (h % 30) };
+  });
   return oppCache.board;
 }
 const onBoard = () => run.board.filter(Boolean).length;
 const owned = (id) => [...run.board, ...run.bench].filter((p) => p && p.id === id && p.star === 1).length;
 const charOf = (p, team, slot) => {
   const base = UNIT[p.id].char;
-  // Distinct id per kit: the shared portrait cache keys on id only.
-  return { ...base, id: `${p.id}@${team}`, team, pos: slot === 'gk' ? 'GK' : POS_OF[slot] };
+  // Distinct id per unit and kit: the portrait cache and the match view key on id.
+  return { ...base, ...(p.look || {}), name: p.name || base.name, id: `${p.id}#${p.uid ?? 0}${p.name ? '~' + p.name : ''}@${team}`, team, pos: slot === 'gk' ? 'GK' : POS_OF[slot] };
 };
 const keeperChar = (team) => (team === 'sun' ? { ...byId.wak, id: 'wak@sun' } : { ...byId.oskar, id: `oskar@${team}`, team });
 const sprite = (p, size = 60) => spriteURL(charOf(p, 'sun', 4), size);
@@ -112,22 +131,24 @@ function buy(i) {
   if (run.gold < u.cost) { sfx.bad(); shell.toast(`Need ${u.cost} gold`); return; }
   const free = run.bench.findIndex((b) => !b);
   const combines = owned(id) >= 2;
-  if (free < 0 && !combines) { sfx.bad(); shell.toast('Bench full — sell someone (Del) or place them'); return; }
+  if (free < 0 && !combines) { sfx.bad(); shell.toast(`Bench full: sell someone${KB ? ' (Del)' : ''} or place them`); return; }
+  const from = rectOf(`.scard[data-i="${i}"] img`);
   run.gold -= u.cost;
   run.shop[i] = null;
   sfx.coin();
   if (free >= 0) run.bench[free] = U(id); else run.bench.push(U(id));
   shell.log(`Bought ${u.char.name} (${u.cost}g).`, '', '');
-  combine(id);
+  const star = combine(id);
   run.bench = run.bench.slice(0, BENCH).concat(Array(Math.max(0, BENCH - run.bench.length)).fill(null)).slice(0, BENCH);
   draftScreen();
+  if (star) fly(from, unitImg(star.where, star.i)); else if (free >= 0) fly(from, unitImg('bench', free));
 }
 
 function combine(id) {
   const spots = [];
   run.board.forEach((p, s) => { if (p && p.id === id && p.star === 1) spots.push({ where: 'board', i: s }); });
   run.bench.forEach((p, s) => { if (p && p.id === id && p.star === 1) spots.push({ where: 'bench', i: s }); });
-  if (spots.length < 3) return;
+  if (spots.length < 3) return null;
   const use = spots.slice(0, 3);
   for (const sp of use) run[sp.where][sp.i] = null;
   const keep = use[0];
@@ -137,6 +158,7 @@ function combine(id) {
   shell.flash('#FFD23F');
   shell.banner('★★', `${UNIT[id].char.name} upgraded`);
   shell.log(`<b>${UNIT[id].char.name} ★★!</b> Three copies combine: ×${S.STAR_MULT} stats.`, 'good', '');
+  return keep;
 }
 
 function reroll() {
@@ -181,23 +203,58 @@ function moveUnit(from, to) {
   const a = run[from.where][from.i], b = run[to.where][to.i];
   if (!a) { sel = null; draftScreen(); return; }
   if (to.where === 'board' && from.where === 'bench' && !b && onBoard() >= run.slots) {
-    sfx.bad(); shell.toast(`Formation full (${run.slots}). Level up (F) or swap with a player on the pitch.`);
+    sfx.bad(); shell.toast(`Formation full (${run.slots}). Level up${KB ? ' (F)' : ''} or swap with a player on the pitch.`);
     return;
   }
+  const ra = unitImg(from.where, from.i)?.getBoundingClientRect(), rb = unitImg(to.where, to.i)?.getBoundingClientRect();
   run[from.where][from.i] = b;
   run[to.where][to.i] = a;
   sel = null;
   sfx.card();
-  if (to.where === 'board') {
-    const fit = S.fits(a.id, to.i);
-    if (!fit) shell.toast(`⚠ ${UNIT[a.id].char.name} prefers ${ROLE_LINE[S.roleOf(a.id)].map((l) => LINE_NAME[l]).join(' or ')} (60% out of position)`);
-  }
+  // warn about whichever player now stands out of position (either end of a swap)
+  const oop = [[a, to], [b, from]].filter(([u, at]) => u && at.where === 'board' && !S.fits(u.id, at.i));
+  if (oop.length) shell.toast(oop.map(([u]) => `⚠ ${UNIT[u.id].char.name} prefers ${ROLE_LINE[S.roleOf(u.id)].map((l) => LINE_NAME[l]).join(' or ')} (60% out of position)`).join('<br>'));
   draftScreen();
+  fly(ra, unitImg(to.where, to.i));
+  if (b) fly(rb, unitImg(from.where, from.i));
 }
 
+// Patch element a to match b in place (same structure is reused; only changed
+// attributes, text and children are touched), so images and layout never blink.
+function morph(a, b) {
+  if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName) { a.replaceWith(b); return; }
+  if (a.nodeType === 3 || a.nodeType === 8) { if (a.data !== b.data) a.data = b.data; return; }
+  if (a.nodeType !== 1) return;
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name)) a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  const ac = [...a.childNodes], bc = [...b.childNodes];
+  bc.forEach((n, i) => { if (i < ac.length) morph(ac[i], n); else a.appendChild(n); });
+  for (let i = bc.length; i < ac.length; i++) ac[i].remove();
+}
+// A sprite travels from a screen rect to the image it ends up as.
+function fly(from, img) {
+  if (!from || !img) return;
+  const to = img.getBoundingClientRect();
+  if (!to.width) return;
+  const g = img.cloneNode();
+  g.className = 'flyer';
+  Object.assign(g.style, { left: from.left + 'px', top: from.top + 'px', width: from.width + 'px', height: from.height + 'px' });
+  document.body.appendChild(g);
+  img.style.visibility = 'hidden';
+  const dx = to.left - from.left, dy = to.top - from.top, k = to.height / Math.max(1, from.height);
+  g.animate([{ transform: 'none' }, { transform: `translate(${dx}px, ${dy}px)` }], { duration: 260, easing: 'cubic-bezier(.3,.7,.3,1)' })
+    .finished.catch(() => {}).then(() => { g.remove(); img.style.visibility = ''; });
+  g.animate([{ width: from.width + 'px', height: from.height + 'px' }, { width: to.width + 'px', height: to.height + 'px' }], { duration: 260, easing: 'cubic-bezier(.3,.7,.3,1)' });
+  void k;
+}
+const rectOf = (sel) => stage.querySelector(sel)?.getBoundingClientRect() || null;
+const unitImg = (where, i) => stage.querySelector(`.slot[data-where="${where}"][data-i="${i}"] .unit img`);
+
 // ================================================================ draft screen
-function draftScreen() {
-  if (view) { view.running = false; view = null; }
+// enter = a real screen change (phase start, half-time, new matchday): fade in.
+// Otherwise the existing screen is patched in place, so taps never blink it.
+function draftScreen(enter = false) {
+  killView();
   busy = false;
   const r = R();
   const T = TEAMS[r.club];
@@ -207,13 +264,13 @@ function draftScreen() {
   const ht = run.half === 2;
   const selP = sel ? run[sel.where][sel.i] : null;
 
-  stage.innerHTML = `<div class="ax">
+  const html = `<div class="ax draft${enter ? ' enter' : ''}">
     <div class="topinfo panel dark">
       <div class="opp">${crestSVG('red', 34).replace(/#E8463A/g, T.shirt)}
         <div><div class="rl">${r.label} · ${r.league}</div><b>${T.name}</b> <span class="schip" style="background:${TRAITS[r.style].color}">${TRAITS[r.style].icon} ${TRAITS[r.style].name}</span></div></div>
       <div class="res"><span class="hp" title="Hearts">❤️ ${run.hp}</span><span class="gold" title="Gold">🪙 ${run.gold}</span></div>
     </div>
-    ${ht ? `<div class="htbar">⏸ HALF-TIME SHOP · ${run.score[0]}–${run.score[1]} · +4 gold, fresh shop</div>` : ''}
+    ${ht ? `<div class="htbar"><span class="hthead">⏸ HT ${run.score[0]}–${run.score[1]} · +4 gold</span>${report && report.half === 1 ? `<button class="htwhy" id="why"><span>${reportLine(report)}</span><b>Why ▸</b></button>` : '<span class="htnote">Fresh shop. Fix what went wrong.</span>'}</div>` : ''}
     <div class="syn" id="syn">${synergyChips(you)}</div>
     <div class="boardwrap">
       <div class="board" id="board">
@@ -225,10 +282,13 @@ function draftScreen() {
     </div>
     <div class="infoline" id="infoline">${selP ? unitInfo(selP, sel) : linkInfo(you)}</div>
     <div class="benchrow"><span class="lbl">Bench</span>${run.bench.map((_, i) => slotHTML('bench', i)).join('')}</div>
-    <div class="shophead"><b>Shop</b><span class="muted odds-note">${SHOP_ODDS[run.slots].map((p, i) => `${i + 1}g ${Math.round(p * 100)}%`).join(' · ')}</span>
-      <button class="btn small paper" id="reroll">🔄 1g <span class="key">R</span></button>
-      <button class="btn small blue" id="level" ${run.slots >= MAX_SLOTS ? 'disabled' : ''}>⬆ ${run.slots >= MAX_SLOTS ? 'Max' : LEVEL_COST[run.slots] + 'g'} <span class="key">F</span></button></div>
+    <div class="shophead">
+      <button class="btn small paper" id="reroll" title="Reroll the shop">🔄 1g <span class="key">R</span></button>
+      <button class="btn small blue" id="level" title="Room for one more player" ${run.slots >= MAX_SLOTS ? 'disabled' : ''}>⬆ ${run.slots >= MAX_SLOTS ? 'Max' : LEVEL_COST[run.slots] + 'g'} <span class="key">F</span></button>
+      <span class="mini">Win ${oddsPill(P.w)}</span>
+      <button class="btn" id="kick">${ht ? '2nd half' : 'Kick off'} ▶ <span class="key">↵</span></button></div>
     <div class="shop" id="shop">${run.shop.map((id, i) => shopCard(id, i)).join('')}</div>
+    <div class="muted odds-note">Shop odds at level ${run.slots}: ${SHOP_ODDS[run.slots].map((p, i) => `${i + 1}g ${Math.round(p * 100)}%`).join(' · ')}. Tap a card to buy.</div>
     <div class="proj panel">
       <div class="phead"><b>Projection</b> <span class="muted">${ht ? '2nd half from ' + run.score.join('–') : 'full match'}</span><button class="btn small ghost" id="scout">🔍 Scout</button></div>
       <div class="wdl">Win ${oddsPill(P.w)} Draw ${oddsPill(P.d)} Loss ${oddsPill(P.l)}</div>
@@ -236,9 +296,10 @@ function draftScreen() {
       ${compareHTML(you, opp)}
       ${you.notes.length ? `<div class="notes">${you.notes.map((n) => '⚠ ' + n).join('<br>')}</div>` : ''}
     </div>
-    <div class="bottombar"><div class="mini">Win ${oddsPill(P.w)} <span class="muted">xG ${P.xgY.toFixed(1)}–${P.xgO.toFixed(1)}</span></div>
-      <button class="btn big" id="kick">${ht ? 'Second half' : 'Kick off'} ▶ <span class="key">↵</span></button></div>
   </div>`;
+  const cur = stage.querySelector('.ax.draft');
+  if (enter || !cur) stage.innerHTML = html;
+  else { const t = document.createElement('template'); t.innerHTML = html; morph(cur, t.content.firstElementChild); }
 
   stage.querySelectorAll('[data-where]').forEach((el) => {
     el.onclick = () => { if (dragJust) { dragJust = false; return; } tapSlot(el.dataset.where, +el.dataset.i); };
@@ -253,7 +314,10 @@ function draftScreen() {
   stage.querySelector('#level').onclick = levelUp;
   stage.querySelector('#kick').onclick = kickOff;
   stage.querySelector('#scout').onclick = scout;
-  stage.querySelector('#sellbtn')?.addEventListener('click', () => sell(sel.where, sel.i));
+  const sb = stage.querySelector('#sellbtn');
+  if (sb) sb.onclick = () => sell(sel.where, sel.i);
+  const why = stage.querySelector('#why');
+  if (why) why.onclick = () => shell.modal({ title: 'What decided the first half', html: reportHTML(report), buttons: [{ label: 'Back to the shop' }] });
 }
 
 function synergyChips(st) {
@@ -295,15 +359,15 @@ function unitInfo(p, s) {
   const u = UNIT[p.id], st = u.char.stats;
   const where = s.where === 'board' ? `${LINE_NAME[S.lineOf(s.i)]}${S.fits(p.id, s.i) ? '' : ' ⚠ out of position'}` : 'Bench';
   const v = u.cost * (p.star === 2 ? 3 : 1);
-  return `<div class="uinfo"><b>${u.char.name} ${stars(p)}</b> <span class="muted">${u.char.nick || ''} · ${where}</span>
-    <span class="stats">PAC ${st.pace} · PAS ${st.pass} · SHO ${st.shoot} · TAC ${st.tackle} · DRI ${st.dribble} · STA ${st.stamina}</span>
-    <span>${u.traits.map((t) => `${TRAITS[t].icon} ${TRAITS[t].name}`).join(' · ')} · wants <b>${ROLE_LINE[u.traits[1]].map((l) => LINE_NAME[l]).join('/')}</b></span>
-    <span class="muted">Tap a slot to move. Esc to cancel.</span>
-    <button class="btn small red" id="sellbtn">Sell +${v}g <span class="key">Del</span></button></div>`;
+  return `<div class="uinfo"><span class="top"><b>${u.char.name} ${stars(p)}</b> <span class="muted">· ${where}</span></span>
+    <button class="btn small red" id="sellbtn">Sell +${v}g <span class="key">Del</span></button>
+    <span>${u.traits.map((t) => `${TRAITS[t].icon} ${TRAITS[t].name}`).join(' · ')} · wants <b style="font-size:11px;font-family:inherit;font-weight:900">${ROLE_LINE[u.traits[1]].map((l) => LINE_NAME[l]).join('/')}</b></span>
+    <span class="muted">PAC ${st.pace} PAS ${st.pass} SHO ${st.shoot} TAC ${st.tackle} DRI ${st.dribble} STA ${st.stamina} · tap a slot to move</span></div>`;
 }
+const FX_SHORT = { ctrl: 'Ctrl', atk: 'Atk', fin: 'Fin', def: 'Def', prs: 'Press', gk: 'GK' };
 function linkInfo(st) {
-  if (!st.links.length) return `<span class="muted">Links: put a Playmaker behind a forward, two Walls side by side, an Engine next to a midfielder, or a Speedster on a flank.</span>`;
-  return st.links.map((l) => `<span class="lk ${l.kind}">${{ feed: '🎯', pair: '🤝', engine: '🫀', wing: '💨' }[l.kind]} ${l.text}</span>`).join('');
+  if (!st.links.length) return `<span class="muted">Links: a Playmaker behind a forward, two Walls side by side, an Engine next to a midfielder, or a Speedster on a flank.</span>`;
+  return st.links.map((l) => `<span class="lk ${l.kind}" title="${l.text}">${l.tag} ${Object.entries(l.fx).filter(([k]) => FX_SHORT[k]).map(([k, v]) => `+${v} ${FX_SHORT[k]}`).join(' ')}</span>`).join('');
 }
 function linkSVG(L) {
   const c = (s) => [50 + (s % 3) * 100, 40 + Math.floor(s / 3) * 80];
@@ -326,7 +390,7 @@ function scout() {
   const T = TEAMS[R().club];
   shell.modal({ title: `Scout: ${T.name}`, html: `
     <div class="syn">${synergyChips(st)}</div>
-    <div class="scoutboard">${[0, 1, 2].map((row) => `<div class="srow">${[0, 1, 2].map((c) => { const p = ob[row * 3 + c]; return `<div class="sslot">${p ? `<img src="${spriteURL(charOf(p, R().club, row * 3 + c), 44)}" alt=""><b>${UNIT[p.id].char.name} ${stars(p)}</b>` : ''}</div>`; }).join('')}</div>`).join('')}</div>
+    <div class="scoutboard">${[0, 1, 2].map((row) => `<div class="srow">${[0, 1, 2].map((c) => { const p = ob[row * 3 + c]; return `<div class="sslot">${p ? `<img src="${spriteURL(charOf(p, R().club, row * 3 + c), 44)}" alt=""><b>${S.nameOf(p)} ${stars(p)}</b>` : ''}</div>`; }).join('')}</div>`).join('')}</div>
     <p style="font-size:13px;margin:6px 0 0">${st.links.map((l) => l.text).join('<br>') || 'No links.'}</p>
     <p class="muted" style="font-size:12px">Keeper rating ${R().keeper + 3}. They attack DOWN the pitch, so their front line faces your back line.</p>`, buttons: [{ label: 'Back to the shop' }] });
 }
@@ -345,7 +409,7 @@ function moveDrag(e) {
   if (!drag) return;
   if (!drag.ghost && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) {
     const img = drag.el.querySelector('img');
-    drag.ghost = img.cloneNode(); drag.ghost.className = 'ghost';
+    drag.ghost = img.cloneNode(); drag.ghost.className = 'dragghost';
     document.body.appendChild(drag.ghost);
     drag.el.classList.add('dragging');
   }
@@ -384,121 +448,304 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ================================================================ match
+// The half is drawn by the shared broadcast view (shared/matchview.js): every
+// change of possession is a physical contact, and every log line, score change
+// and banner is written on that contact frame (onHit), never before it.
 function kickOff() {
   if (busy) return;
   if (onBoard() === 0) { sfx.bad(); shell.toast('Put at least one player on the pitch'); return; }
   playHalf();
 }
 
-let skipping = false;
-function skip() { if (view) { view.speed = 6; skipping = true; markSpeed(); } }
+function skip() { if (view) { view.speed = 5; markSpeed(); } }
 function markSpeed() { stage.querySelectorAll('[data-sp]').forEach((b) => b.classList.toggle('pressed', +b.dataset.sp === view?.speed)); }
 
+let curMin = 0;
+let lines = [];       // newest first, for the ticker under the pitch
+let report = null;    // what decided the half: { goals: [], credit: { you: {}, opp: {} } }
+// A player's name with a kit-coloured dot, so "Nora wins it off Nora" can never happen
+// unreadably: the dot says whose player it is.
+const kitColor = (side) => (side === 'you' ? '#FFD23F' : TEAMS[R().club].shirt);
+const nm = (a) => (a?.c ? `<span class="pn" style="--k:${kitColor(a.side)}">${a.c.name}</span>` : '');
+const teamName = (side) => (side === 'you' ? 'Sunbirds' : TEAMS[R().club].name);
+const good = (side) => (side === 'you' ? 'good' : 'bad');
+const pc = (p) => `${Math.round(p * 100)}%`;
+const lbl = (c, tail, fallback) => (c ? `${c.label} → ${tail}` : fallback);
+const whyH = (c) => (c ? ` <i class="why">${c.label}</i>` : '');
+const teamOf = (side) => (side === 'you' ? 'sun' : R().club);
+const boardOf = (side) => (side === 'you' ? run.board : oppBoard());
+
+function say(text, kind = '') {
+  shell.log(text, kind, `${curMin}'`);
+  lines.unshift({ text, kind, min: curMin });
+  lines.length = Math.min(lines.length, 2);
+  const t = stage.querySelector('#ticker');
+  if (t) t.innerHTML = tickerHTML();
+}
+const tickerHTML = () => lines.map((l) => `<li class="${l.kind}"><b>${l.min}'</b> ${l.text}</li>`).join('');
+// Credit a synergy or placement with an event that went `side`'s way.
+function credit(side, c, what) {
+  if (!c || !report) return;
+  const r = report.credit[side];
+  r[c.label] = r[c.label] || {};
+  r[c.label][what] = (r[c.label][what] || 0) + 1;
+}
+
+function squadOf(side) {
+  const team = teamOf(side);
+  const gk = { c: keeperChar(team), home: slotUV('gk') };
+  return [gk, ...boardOf(side).map((p, s) => p && { c: charOf(p, team, s), home: slotUV(s), star: p.star }).filter(Boolean)];
+}
+// The on-pitch actor of a board unit (or of a slot), or null.
+const actorOf = (side, p) => {
+  const b = boardOf(side), s = b.indexOf(p);
+  return s >= 0 && view ? view.find(charOf(p, teamOf(side), s), side) : null;
+};
 async function playHalf() {
-  busy = true; sel = null; skipping = false;
+  busy = true; sel = null;
   const r = R(), T = TEAMS[r.club];
   const half = run.half;
   const you = youSide(), opp = oppSide();
   const res = S.simHalf(you, opp, half);
   const P = S.projectMatch(you, opp, run.score, half);
-  stage.innerHTML = `<div class="ax match">
+  report = { half, goals: [], credit: { you: {}, opp: {} }, notes: res.Y.notes.filter((n) => n.startsWith('Tired')) };
+  lines = [];
+  window.scrollTo(0, 0);
+  stage.innerHTML = `<div class="ax match enter">
     <div class="pitchwrap"><canvas id="pitch"></canvas>
       <div class="halfbadge">${half === 1 ? '1st half' : '2nd half'} · vs ${T.name}</div>
-      <div class="simctl"><button class="btn small paper" data-sp="1">×1</button><button class="btn small paper" data-sp="2">×2</button><button class="btn small paper" data-sp="6">⏭ <span class="key">Space</span></button></div>
     </div>
-    <div class="mstrip panel dark">
-      <div><span class="muted" style="font-size:11px">At kick-off:</span> Win ${oddsPill(P.w)} Draw ${oddsPill(P.d)} Loss ${oddsPill(P.l)}</div>
-      <div class="muted" style="font-size:12px">xG ${P.xgY.toFixed(2)}–${P.xgO.toFixed(2)} · Ball ${Math.round(res.share * 100)}% · Press ${S.f1(res.Y.s.prs)} vs Control ${S.f1(res.O.s.ctrl)}</div>
-      <div class="syn small">${res.Y.active.map((a) => `<span class="tchip on" style="--tc:${TRAITS[a.t].color}"><i>${TRAITS[a.t].icon}</i><span class="tn">${TRAITS[a.t].name}</span><span class="tc">${a.n}</span></span>`).join('')}</div>
+    <ol class="ticker" id="ticker"></ol>
+    <div class="mctl">
+      <div class="syn small">${res.Y.active.map((a) => `<span class="tchip on" style="--tc:${TRAITS[a.t].color}"><i>${TRAITS[a.t].icon}</i><span class="tn">${TRAITS[a.t].name}</span><span class="tc">${a.n}</span></span>`).join('') || '<span class="muted" style="font-size:12px">No synergies active</span>'}</div>
+      <div class="simctl"><button class="btn small paper" data-sp="1">×1</button><button class="btn small paper" data-sp="2">×2</button><button class="btn small paper" data-sp="5">⏭<span class="key">Space</span></button></div>
     </div>
+    <div class="mstrip muted">At kick-off: win ${pc(P.w)} · draw ${pc(P.d)} · loss ${pc(P.l)} · xG ${P.xgY.toFixed(2)}–${P.xgO.toFixed(2)} · ball ${pc(res.share)}</div>
   </div>`;
+  killView();
   const cv = stage.querySelector('#pitch');
   view = new MatchView(cv);
+  const myView = view;
+  const alive = () => view === myView;
   const wrap = stage.querySelector('.pitchwrap');
   const w = wrap.clientWidth;
-  view.resize(w, Math.round(Math.min(w * 1.25, Math.max(340, innerHeight * 0.6))), r.variant);
-  const youList = [{ c: keeperChar('sun'), slot: 'gk' }, ...run.board.map((p, s) => p && { c: charOf(p, 'sun', s), slot: s, star: p.star }).filter(Boolean)];
-  const oppList = [{ c: keeperChar(r.club), slot: 'gk' }, ...opp.board.map((p, s) => p && { c: charOf(p, r.club, s), slot: s, star: p.star }).filter(Boolean)];
-  view.setTeams(youList, oppList);
+  // One size for the whole half: fit the pitch, the ticker and the controls on screen.
+  const room = innerHeight - wrap.getBoundingClientRect().top - 128;
+  view.resize(w, Math.round(clamp(room, 300, w * 1.25)), r.variant);
+  view.setTeams(squadOf('you'), squadOf('opp'));
   stage.querySelectorAll('[data-sp]').forEach((b) => b.onclick = () => { view.speed = +b.dataset.sp; sfx.click(); markSpeed(); });
   markSpeed();
 
-  const t0 = half === 1 ? 0 : 45;
-  shell.setScore({ home: run.score[0], away: run.score[1], clock: `${t0}'`, awayTeam: 'red' });
-  shell.log(`${half === 1 ? 'Kick-off' : 'Second half'} vs ${T.name}. Projection: win ${Math.round(P.w * 100)}%, xG ${P.xgY.toFixed(2)}–${P.xgO.toFixed(2)}.`, 'info', `${t0}'`);
-  if (res.Y.active.length) shell.log(`Your synergies: ${res.Y.active.map((a) => `${TRAITS[a.t].icon} ${TRAITS[a.t].name} ${a.n}`).join(', ')}.`, 'info', `${t0}'`);
-  for (const l of res.Y.links) shell.log(l.text, 'info', `${t0}'`);
-  for (const n of res.Y.notes) shell.log(n, 'bad', `${t0}'`);
+  curMin = half === 1 ? 0 : 45;
+  shell.setScore({ home: run.score[0], away: run.score[1], clock: `${curMin}'`, awayTeam: 'red' });
+  shell.log(`${half === 1 ? 'Kick-off' : 'Second half'} vs ${T.name}. Projection: win ${pc(P.w)}, xG ${P.xgY.toFixed(2)}–${P.xgO.toFixed(2)}.`, 'info', `${curMin}'`);
+  for (const n of res.Y.notes) shell.log(n, 'bad', `${curMin}'`);
   sfx.whistle(half === 1 ? 1 : 2);
-  await view.wait(0.6);
+  await view.reset(half === 1 ? 'you' : 'opp');
+  if (!alive()) return;
+  say(`${teamName(half === 1 ? 'you' : 'opp')} kick off${res.Y.active.length ? `. Your synergies: ${res.Y.active.map((a) => `${TRAITS[a.t].icon} ${TRAITS[a.t].name} ${a.n}`).join(', ')}` : ''}.`, 'info');
 
-  const myView = view;
   for (const poss of res.poss) {
-    if (view !== myView) return; // phase changed mid-sim
-    shell.setScore({ home: run.score[0], away: run.score[1], clock: `${poss.min}'`, awayTeam: 'red' });
-    for (const l of poss.log) shell.log(l.text, l.kind, `${poss.min}'`);
-    for (const b of poss.beats) {
-      if (view !== myView) return;
-      await playBeat(b, r, poss.min);
+    curMin = poss.min;
+    took = new Set();
+    shell.setScore({ home: run.score[0], away: run.score[1], clock: `${curMin}'`, awayTeam: 'red' });
+    for (let k = 0; k < poss.beats.length; k++) {
+      await playBeat(poss.beats[k], poss.beats[k + 1]);
+      if (!alive()) return;
     }
-    await view.wait(0.25);
+    await view.wait(0.15);
+    if (!alive()) return;
   }
-  if (view !== myView) return;
+  curMin = half === 1 ? 45 : 90;
   sfx.whistle(half === 1 ? 2 : 3);
+  shell.setScore({ home: run.score[0], away: run.score[1], clock: half === 1 ? 'HT' : 'FT', awayTeam: 'red' });
   if (half === 1) {
     shell.banner('HALF-TIME', `${run.score[0]}–${run.score[1]}`);
+    say(`Half-time: ${run.score[0]}–${run.score[1]}.`, 'info');
+    view.speed = 1;
     await view.wait(1.4);
-    if (view !== myView) return;
+    if (!alive()) return;
     run.half = 2;
     run.gold += 4;
     rollShop();
-    shell.log(`Half-time: ${run.score[0]}–${run.score[1]}. +4 gold and a fresh shop. Fix what went wrong.`, 'info', "45'");
-    draftScreen();
+    shell.log(`Half-time shop: +4 gold and a fresh shop. Fix what went wrong.`, 'info', "45'");
+    draftScreen(true);
   } else {
+    view.speed = 1;
     await view.wait(0.8);
-    if (view !== myView) return;
+    if (!alive()) return;
     fullTime();
   }
 }
 
-async function playBeat(b, r, min) {
+// Actors who touched the ball in this possession (by c.id). A synergy or link is
+// credited only when its own players took part: a link needs both of them.
+let took = new Set();
+const touch = (...as) => as.forEach((a) => a?.c && took.add(a.c.id));
+const slotIds = (side, who) => who.map((sl) => boardOf(side)[sl]).filter(Boolean).map((p) => charOf(p, teamOf(side), boardOf(side).indexOf(p)).id);
+function pickCause(side, list) {
+  for (const c of list || []) {
+    const ids = slotIds(side, c.who);
+    if (!ids.length) continue;
+    if (c.link ? ids.every((id) => took.has(id)) : ids.some((id) => took.has(id))) return c;
+  }
+  return null;
+}
+// The first cause with a player on the pitch, nearest the ball, does the tackle.
+function causeActor(side, list) {
+  if (!view) return null;
+  for (const c of list || []) {
+    const as = slotIds(side, c.who).map((id) => view.team(side).find((a) => a.c.id === id)).filter(Boolean);
+    if (!as.length) continue;
+    const b = view.ball;
+    return as.reduce((m, a) => (Math.hypot(a.x - b.x, a.y - b.y) < Math.hypot(m.x - b.x, m.y - b.y) ? a : m));
+  }
+  return null;
+}
+// One floating label per contact. The view's own labels are switched off (label: '')
+// and the game draws a single combined one; a label that follows another within
+// its life is lifted clear of it instead of drawn on top.
+let lastMark = 0;
+function mark(i, text, color = '#fff') {
+  if (!text || !view || i.x == null) return;
+  const now = performance.now();
+  const recent = ((now - lastMark) / 1000) * view.speed < 0.8;
+  lastMark = now;
+  view.label(text, i.x, i.y - view.size * (recent ? 1.55 : 0.9), color, 0.8);
+}
+// " · shot 23%" when the next beat is this side's shot, so the odds ride on this label.
+const shotTail = (side, next) => (next && next.k === 'shot' && next.side === side ? ` · shot ${pc(next.p)}` : '');
+
+async function playBeat(b, next) {
   const v = view;
-  if (b.k === 'build') return v.build(b.side);
-  if (b.k === 'press') return v.press(b.side);
-  if (b.k === 'progress') return v.progress(b.side);
-  if (b.k === 'blocked') return v.blocked(b.side);
-  if (b.k === 'counter') return v.counter(b.side);
-  if (b.k === 'corner') return v.corner(b.side);
-  if (b.k === 'shot') {
-    const team = b.side === 'you' ? 'sun' : r.club;
-    const slot = (b.side === 'you' ? run.board : oppBoard()).findIndex((p) => p === b.who);
-    const c = b.who ? charOf(b.who, team, slot) : null;
-    const a = await v.setShooter(c, b.side);
-    v.label(`${Math.round(b.p * 100)}%`, a.x, a.y - v.size * 1.1, b.side === 'you' ? '#FFD23F' : '#FF8A80', 1);
-    await v.wait(0.35);
-    const name = b.who ? UNIT[b.who.id].char.name : 'Their striker';
-    const word = { goal: 'GOAL', save: 'saved', miss: 'wide' }[b.result];
-    if (b.result === 'goal') {
-      const shot = v.shot(a, b.side, 'goal');
-      await v.wait(0.45);
-      if (b.side === 'you') {
-        run.score[0]++;
-        shell.banner('GOAL!', `${name} · ${run.score[0]}–${run.score[1]}`);
-        shell.confetti(); shell.flash('#FFD23F');
-      } else {
-        run.score[1]++;
-        shell.banner('GOAL', `${name} · ${run.score[0]}–${run.score[1]}`, '#FF6B6B');
-        sfx.groan();
-      }
-      shell.shake();
-      shell.setScore({ home: run.score[0], away: run.score[1], clock: `${min}'`, awayTeam: 'red' });
-      shell.log(`<b>${name} scores!</b> ${b.tag}, ${Math.round(b.p * 100)}% shot. ${run.score[0]}–${run.score[1]}`, 'goal', `${min}'`);
-      await shot;
-    } else {
-      shell.log(`${name}: ${b.tag.toLowerCase()} (${Math.round(b.p * 100)}%) — ${word}.`, b.side === 'you' ? 'bad' : 'good', `${min}'`);
-      await v.shot(a, b.side, b.result);
+  const side = b.side;
+  const tail = shotTail(side, next);
+  switch (b.k) {
+    case 'build':
+      return v.build(side, { label: '', onHit: (i) => {
+        touch(i.by, i.from);
+        const t = { longball: `${nm(i.from)}'s long ball is won by ${nm(i.by)}`, intercept: `${nm(i.by)} cuts out ${nm(i.from)}'s pass`,
+          rollout: `${nm(i.from)} rolls it out to ${nm(i.by)}`, collect: `${nm(i.by)} picks up the loose ball`, kickoff: `${nm(i.from)} kicks off to ${nm(i.by)}` }[i.kind];
+        const won = i.kind === 'longball' || i.kind === 'intercept' || i.kind === 'collect';
+        const c = won ? pickCause(side, b.causes) : null;
+        if (won) mark(i, lbl(c, side === 'you' ? 'our ball' : 'their ball', i.kind === 'intercept' ? 'CUT OUT!' : i.kind === 'longball' ? 'WON IT' : null), '#9BE7FF');
+        if (t) say(`${t}${won ? ` (${side === 'you' ? 'your' : 'their'} ball ${pc(b.p)})${whyH(c)}` : ''}.`, side === 'you' ? '' : 'them');
+      } });
+    case 'press': {
+      const opts = { label: '', onHit: (i) => {
+        touch(i.by);
+        const c = pickCause(side, b.causes);
+        credit(side, c, 'steal');
+        mark(i, lbl(c, 'WON IT!', 'WON IT!') + tail, '#FF8A3D');
+        say(`${nm(i.by)} wins it off ${nm(i.from)} (press ${pc(b.p)})${whyH(c)}.`, good(side));
+      } };
+      const a = causeActor(side, b.causes);
+      return a && v.carrier && v.carrier.side !== side ? v.tackle(a, { tag: 'press', ...opts }) : v.press(side, opts);
+    }
+    case 'progress':
+      return v.progress(side, { label: '', onHit: (i) => {
+        touch(i.by, i.from);
+        const c = pickCause(side, b.causes);
+        credit(side, c, 'break');
+        mark(i, lbl(c, b.big ? 'BIG CHANCE' : 'through!', b.big ? 'BIG CHANCE' : 'through!') + tail, '#FFD23F');
+        say(`${i.by === i.from ? `${nm(i.by)} drives` : `${nm(i.from)} finds ${nm(i.by)}`} through the line (${pc(b.p)})${b.big ? ': <b>big chance</b>' : ''}${whyH(c)}.`, side === 'you' ? '' : 'them');
+      } });
+    case 'blocked': {
+      const opts = { label: '', onHit: (i) => {
+        touch(i.by);
+        const c = pickCause(side, b.causes);
+        credit(side, c, 'stop');
+        // a counter follows at once: its label carries the news, so this one stays short
+        mark(i, next && next.k === 'counter' ? 'BLOCKED!' : lbl(c, 'BLOCKED!', 'BLOCKED!'), '#9BE7FF');
+        say(`${nm(i.by)} ${i.kind === 'intercept' ? `cuts out ${nm(i.from)}'s pass` : `stops ${nm(i.from)}`} (${pc(b.p)} to hold)${whyH(c)}.`, good(side));
+      } };
+      const a = causeActor(side, b.causes);
+      return a && v.carrier && v.carrier.side !== side ? v.tackle(a, { tag: 'blocked', ...opts }) : v.blocked(side, opts);
+    }
+    case 'counter':
+      return v.counter(side, { label: '', onHit: (i) => {
+        touch(i.by, i.to);
+        const c = pickCause(side, b.causes);
+        credit(side, c, 'counter');
+        mark(i, lbl(c, 'COUNTER!', 'COUNTER!') + tail, '#FFD23F');
+        say(`Counter! ${nm(i.by)} sends ${nm(i.to) || 'it'} away (${pc(b.p)})${whyH(c)}.`, good(side));
+      } });
+    case 'corner':
+      return v.corner(side, null, { label: '', onHit: (i) => {
+        const c = b.causes?.[0] || null; // a team set piece: the synergy itself won it
+        mark(i, lbl(c, 'CORNER', 'CORNER') + tail, '#fff');
+        say(`${nm(i.by)} turns it behind. Corner to ${teamName(side)}${whyH(c)}.`, side === 'you' ? '' : 'them');
+      } });
+    case 'shot': {
+      // The player already on the ball takes the shot after a counter or a run
+      // through the line; otherwise the sim's shooter gets it.
+      const C = v.carrier;
+      const onBall = !b.header && C && C.side === side && C.c.pos !== 'GK' && (b.tag === 'on the break' || C.c.pos === 'FW') ? C.c : null;
+      const shooterC = onBall || (b.who ? charOf(b.who, teamOf(side), boardOf(side).indexOf(b.who)) : null);
+      const a = await v.setShooter(shooterC, side, { header: b.header });
+      if (view !== v || !a) return;
+      return playShot(a, b);
     }
   }
+}
+
+function playShot(A, b) {
+  const side = b.side;
+  const how = b.tag ? ` ${b.tag}` : '';
+  touch(A, view.carrier);
+  return view.shot(A, side, b.result, { header: b.header, miss: b.post ? 'post' : 'wide', label: '', onHit: (i) => {
+    if (i.result === 'goal') {
+      const c = b.header ? b.causes?.[0] || null : pickCause(side, b.causes);
+      credit(side, c, 'goal');
+      goal(side, A);
+      mark(i, c ? `GOAL! ${c.label}` : '', '#FFD23F');
+      report?.goals.push({ side, min: curMin, name: nm(A), cause: c?.label || '' });
+      say(`GOAL! ${nm(A)} scores${how} (${pc(b.p)})${whyH(c)}. ${run.score[0]}–${run.score[1]}`, 'goal');
+    } else if (i.kind === 'save') {
+      const def = side === 'you' ? 'opp' : 'you';
+      touch(i.by);
+      const c = b.causes?.[0] || null; // a keeper bonus is team-wide: the synergy itself made the save
+      credit(def, c, 'save');
+      mark(i, lbl(c, 'SAVED!', 'SAVED!'), '#9BE7FF');
+      say(`${nm(i.by)} saves from ${nm(A)}${how} (${pc(b.p)} chance)${whyH(c)}.`, side === 'you' ? 'bad' : 'good');
+    } else {
+      mark(i, i.kind === 'post' ? 'POST!' : 'WIDE!', '#fff');
+      say(`${nm(A)}${b.tag ? ' shoots ' + b.tag + ' and' : ''} hits ${i.kind === 'post' ? 'the post' : 'it wide'} (${pc(b.p)} chance).`, side === 'you' ? 'bad' : 'good');
+    }
+  } });
+}
+
+// Score, banner and noise: called on the frame the ball crosses the line.
+function goal(side, A) {
+  if (side === 'you') run.score[0]++; else run.score[1]++;
+  shell.setScore({ home: run.score[0], away: run.score[1], clock: `${curMin}'`, awayTeam: 'red' });
+  if (side === 'you') { shell.banner('GOAL!', `${nm(A)} · ${run.score[0]}–${run.score[1]}`); shell.confetti(); }
+  else { shell.banner('GOAL', `${nm(A)} · ${run.score[0]}–${run.score[1]}`, '#FF6B6B'); sfx.groan(); }
+  shell.shake(stage.querySelector('.pitchwrap'));
+}
+
+// What decided the last half: goals with their cause, then each side's synergy or
+// placement that did the most work. Shown on the half-time shop and at full time.
+const VERB = { goal: ['goal', 'goals'], steal: ['steal', 'steals'], stop: ['stop', 'stops'], break: ['break', 'breaks'], counter: ['counter', 'counters'], save: ['save', 'saves'] };
+const repTop = (rep, side) => Object.entries(rep.credit[side]).map(([k, w]) => ({ k, w, n: Object.values(w).reduce((a, b) => a + b, 0) }))
+  .sort((a, b) => b.n - a.n).slice(0, 2)
+  .map(({ k, w, n }) => ({ n, html: `<b>${k}</b> ${Object.entries(w).map(([x, c]) => `${c} ${VERB[x][c > 1 ? 1 : 0]}`).join(', ')}` }));
+// One line for the half-time strip: the synergy or link that did the most work.
+function reportLine(rep) {
+  const y = repTop(rep, 'you')[0], o = repTop(rep, 'opp')[0];
+  if (!y && !o) return 'No synergy or link decided it.';
+  return !y || (o && o.n > y.n) ? `Them: ${o.html}` : `You: ${y.html}`;
+}
+function reportHTML(rep) {
+  if (!rep) return '';
+  const top = (side) => repTop(rep, side).map((x) => x.html);
+  const goals = rep.goals.map((g) => `<li class="${g.side === 'you' ? 'good' : 'bad'}">⚽ ${g.min}' ${g.side === 'you' ? 'You' : teamName('opp')}: ${g.name}${g.cause ? ` <i>${g.cause}</i>` : ''}</li>`);
+  const yours = top('you'), theirs = top('opp');
+  const rows = [...goals,
+    yours.length ? `<li>You: ${yours.join(' · ')}</li>` : '<li class="muted">You: no synergy or link made a difference.</li>',
+    theirs.length ? `<li class="bad">Them: ${theirs.join(' · ')}</li>` : '',
+    ...rep.notes.map((n) => `<li class="bad">⚠ ${n}</li>`)];
+  return `<ul class="rep">${rows.join('')}</ul>`;
 }
 
 function fullTime() {
@@ -520,14 +767,15 @@ function fullTime() {
   shell.setScore({ home: a, away: b, clock: 'FT', awayTeam: 'red' });
   shell.log(`Full time ${a}–${b} vs ${T.name}.${pens}${dmg ? ` −${dmg} ❤️` : ''}`, result === 'win' ? 'good' : 'bad', "90'");
   if (result === 'win') { sfx.win(); shell.confetti(); } else sfx.lose();
+  const rep = report && report.half === 2 ? `<p class="muted" style="margin:8px 0 2px;font-size:12px">What decided the second half:</p>${reportHTML(report)}` : '';
 
   if (final && result === 'win') {
     shell.banner('CHAMPIONS!', 'The Cup is yours');
-    shell.modal({ title: '🏆 Cup winners!', html: `<p>You beat ${T.name} ${a}–${b} in the Final with ${run.hp} ❤️ left.${pens}</p><div class="trophy">🏆</div>`, buttons: [{ label: 'New run' }] }).then(() => shell.setPhase('early'));
+    shell.modal({ title: '🏆 Cup winners!', html: `<p>You beat ${T.name} ${a}–${b} in the Final with ${run.hp} ❤️ left.${pens}</p><div class="trophy">🏆</div>${rep}`, buttons: [{ label: 'New run' }] }).then(() => shell.setPhase('early'));
     return;
   }
   if (run.hp <= 0 || final) {
-    shell.modal({ title: final ? 'Runners-up' : 'Knocked out', html: `<p>${final ? `So close: ${T.name} take the Cup.` : 'Out of hearts.'} ${pens}</p><p class="muted">You reached ${r.label}.</p>`, buttons: [{ label: 'New run' }] }).then(() => shell.setPhase('early'));
+    shell.modal({ title: final ? 'Runners-up' : 'Knocked out', html: `<p>${final ? `So close: ${T.name} take the Cup.` : 'Out of hearts.'} ${pens}</p><p class="muted">You reached ${r.label}.</p>${rep}`, buttons: [{ label: 'New run' }] }).then(() => shell.setPhase('early'));
     return;
   }
   const income = 5 + Math.min(3, Math.floor(run.gold / 10)) + (run.streak >= 2 ? 1 : 0) + (result === 'win' ? 1 : 0);
@@ -535,13 +783,14 @@ function fullTime() {
   shell.modal({ title: result === 'win' ? 'Win!' : result === 'draw' ? 'Draw' : 'Defeat',
     html: `<p><b>${a}–${b}</b> vs ${T.name}. ${dmg ? `You lose ${dmg} ❤️ (${run.hp} left).` : 'No hearts lost.'}</p>
       <p>Income: <b>+${income}</b> gold (5 base${Math.min(3, Math.floor(run.gold / 10)) ? ' + interest' : ''}${run.streak >= 2 ? ' + streak' : ''}${result === 'win' ? ' + win' : ''}).</p>
+      ${rep}
       <p>Next: <b>${TEAMS[next.club].name}</b> · ${TRAITS[next.style].icon} ${TRAITS[next.style].name} · ${next.label}</p>`,
     buttons: [{ label: 'To the shop ▶' }] }).then(() => {
     run.round++; run.half = 1; run.score = [0, 0]; run.gold += income;
     rollShop();
     shell.clearLog();
     shell.log(`${R().label}: ${TEAMS[R().club].name} (${TRAITS[R().style].name}). Scout them, then build.`, 'info', '');
-    draftScreen();
+    draftScreen(true);
   });
 }
 

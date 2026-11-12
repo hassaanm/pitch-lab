@@ -28,16 +28,15 @@
   .goalbar .tick.win { font-size: 14px; top: -11px; }
 
   .coaches { display: flex; gap: 5px; justify-content: center; }
-  .coaches.none .slot { height: 30px; }
-  .coaches .slot { width: 62px; height: 80px; border: 2px dashed rgba(255,255,255,.22); border-radius: 10px; display: grid; place-items: center; font-size: 10px; opacity: .5; text-transform: uppercase; }
-  .gcard.mini { width: 62px; height: 80px; border-radius: 10px; }
+  .coaches .slot { width: 62px; height: 70px; border: 2px dashed rgba(255,255,255,.22); border-radius: 10px; display: grid; place-items: center; font-size: 10px; opacity: .5; text-transform: uppercase; }
+  .gcard.mini { width: 62px; height: 70px; border-radius: 10px; }
   .gcard.mini::before { height: 17px; }
   .gcard.mini .name { font-size: 9.5px; height: 17px; padding: 2px 2px 0; line-height: 1; }
-  .gcard.mini .art { height: 40px; margin: 3px 4px 0; border-radius: 6px; }
+  .gcard.mini .art { height: 31px; margin: 3px 4px 0; border-radius: 6px; }
   .gcard.mini .type { font-size: 8px; }
   .gcard.mini .text { display: none; }
   .gcard.coach .art { background-size: cover; background-color: #1d2b53; }
-  .cbadge { position: absolute; right: 2px; top: 44px; background: var(--red); color: #fff; font-family: var(--font-h); font-size: 11px; border: 2px solid var(--ink); border-radius: 6px; padding: 0 3px; z-index: 2; }
+  .cbadge { position: absolute; right: 2px; top: 36px; background: var(--red); color: #fff; font-family: var(--font-h); font-size: 11px; border: 2px solid var(--ink); border-radius: 6px; padding: 0 3px; z-index: 2; }
   .gcard.coach.fire { animation: fire .45s; }
   @keyframes fire { 30% { transform: translateY(-10px) rotate(-6deg) scale(1.12); box-shadow: 0 0 0 3px #ff8a65, 0 6px 0 var(--ink); } 60% { transform: rotate(4deg); } }
 
@@ -57,12 +56,15 @@
   @keyframes bumpy { 40% { transform: scale(1.3) rotate(-3deg); } }
   .calc.flame { box-shadow: 0 0 0 2px #ffb300, 0 0 22px 6px rgba(255,120,0,.75), 0 3px 0 var(--ink); background: linear-gradient(0deg, rgba(200,50,10,.92), rgba(15,20,40,.9) 70%); animation: flame .25s infinite alternate; }
   @keyframes flame { to { box-shadow: 0 0 0 2px #ffd23f, 0 -4px 30px 10px rgba(255,80,0,.8), 0 3px 0 var(--ink); } }
-  .extra { position: absolute; left: 4px; right: 4px; bottom: 4px; z-index: 3; display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; pointer-events: none; }
-  .extra span { font-size: 10px; font-weight: 900; background: rgba(255,246,224,.92); color: var(--ink); border: 1.5px solid var(--ink); border-radius: 6px; padding: 0 4px; }
+  .board canvas { display: block; }
+  .extra { height: 24px; padding: 3px 4px; display: flex; gap: 3px; flex-wrap: nowrap; overflow: hidden; justify-content: safe center; align-items: center; pointer-events: none; background: #1d2740; border-top: 2px solid var(--ink); }
+  .extra span.note { background: #fff3c4; }
+  .shop .shopmsg { min-height: 1.2em; margin: 2px 0 0; font-weight: 800; color: var(--red); text-align: center; }
+  .extra span { white-space: nowrap; font-size: 10px; font-weight: 900; background: rgba(255,246,224,.92); color: var(--ink); border: 1.5px solid var(--ink); border-radius: 6px; padding: 0 4px; }
 
   .handwrap { position: relative; height: 150px; overflow-x: clip; }
   .hand { position: absolute; inset: 24px 0 0 0; }
-  .hand .gcard { position: absolute; top: 0; width: 86px; height: 120px; transform-origin: 50% 130%; transition: transform .14s, left .2s, box-shadow .12s; }
+  .hand .gcard { position: absolute; top: 0; width: 78px; height: 116px; transform-origin: 50% 130%; transition: transform .14s, left .2s, box-shadow .12s; }
   .hand .gcard .cost { width: 28px; height: 28px; font-size: 17px; background: #fff; }
   .hand .gcard .name { font-size: 11px; padding-left: 24px; }
   .hand .gcard .art { height: 46px; margin: 3px 5px 0; background-size: cover; }
@@ -71,7 +73,7 @@
   .hand .gcard.star .text { color: #a06a00; }
   .hand .gcard.sel { box-shadow: 0 0 0 3px var(--sun), 0 7px 0 var(--ink); }
   .hand .gcard.dealt { animation: deal .28s backwards; }
-  @keyframes deal { from { opacity: 0; translate: 0 80px; } }
+  @keyframes deal { from { opacity: 0; translate: 0 36px; } }
   .gcard .kh { position: absolute; right: 4px; bottom: 2px; font-size: 9px; opacity: .45; font-weight: 900; }
 
   .actions { display: flex; gap: 6px; }

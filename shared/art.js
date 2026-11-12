@@ -62,10 +62,60 @@ function circle(ctx, x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2
 
 const hashCode = (s) => [...s].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) | 0, 7);
 
+// ---------------------------------------------------------------- jank detector
+// Dev aid: open any demo with ?jank=1 and every drawPlayer / drawBall call is
+// watched for teleports (a sprite or the ball moving further in one frame than
+// any real motion would). Hits land in window.__jank.events, tagged with
+// window.__jankCtx if the game sets one. Use at x1 speed; a clean run of a full
+// match should record nothing.
+const JANK = (() => {
+  if (typeof window === 'undefined') return null;
+  let on = false;
+  try { on = new URLSearchParams(location.search).has('jank') || localStorage.getItem('pl-jank') === '1'; } catch {}
+  if (!on) return null;
+  const seen = new WeakMap();
+  const api = {
+    events: [],
+    reset() { api.events.length = 0; },
+    summary() {
+      const by = {};
+      for (const e of api.events) { const k = `${e.kind}:${e.ctx || '?'}`; by[k] = (by[k] || 0) + 1; }
+      return { total: api.events.length, by, worst: [...api.events].sort((a, b) => b.dist - a.dist).slice(0, 8) };
+    },
+  };
+  window.__jank = api;
+  api.track = (ctx, kind, id, x, y, alpha = 1) => {
+    const cv = ctx.canvas;
+    if (!cv || !cv.isConnected) return;
+    let m = seen.get(cv);
+    if (!m) { m = new Map(); seen.set(cv, m); }
+    const now = performance.now();
+    const key = kind + ':' + id;
+    const p = m.get(key);
+    m.set(key, { x, y, t: now, alpha });
+    if (!p) return;
+    const dt = (now - p.t) / 1000;
+    if (dt <= 0 || dt > 0.2) return; // first frame after a pause or a hidden tab
+    if (alpha < 0.35 || p.alpha < 0.35) return; // faded out on purpose: a cut, not a teleport
+    const dist = Math.hypot(x - p.x, y - p.y);
+    const speed = dist / dt;
+    const lim = kind === 'ball' ? [36, 3000] : [26, 1500];
+    if (dist > lim[0] && speed > lim[1]) {
+      api.events.push({ kind, id, dist: Math.round(dist), speed: Math.round(speed), from: [Math.round(p.x), Math.round(p.y)], to: [Math.round(x), Math.round(y)], ctx: window.__jankCtx || '', at: Math.round(now) });
+      if (api.events.length > 400) api.events.shift();
+    }
+  };
+  return api;
+})();
+
 // ---------------------------------------------------------------- players
 // Design units: feet at y=0, the whole sprite is ~44 units tall. `size` is the
 // on-screen height in px. Poses: idle, run, kick, pass, dive, slide, celebrate,
 // sad, tackle, ready (keeper crouch), header.
+// Direction: `dive`, `slide` and `tackle` lay the body toward -facing (the
+// head and gloves end up on the -facing side, the boots on the +facing side).
+// So a keeper diving toward +x needs facing = -1.
+// Pass o.lay (0..1) to animate going down and getting up (see below).
 export function drawPlayer(ctx, c, x, y, o = {}) {
   const size = o.size ?? 44;
   const s = size / 44;
@@ -81,6 +131,7 @@ export function drawPlayer(ctx, c, x, y, o = {}) {
   const torsoH = build === 'tall' ? 12 : build === 'small' ? 10 : 11;
   const headR = build === 'small' ? 10.5 : 10;
 
+  if (JANK && !o.noTrack) JANK.track(ctx, 'player', `${c.team}/${c.id}`, x, y, o.alpha ?? 1);
   ctx.save();
   ctx.translate(x, y);
   ctx.globalAlpha = o.alpha ?? 1;
@@ -89,7 +140,7 @@ export function drawPlayer(ctx, c, x, y, o = {}) {
   if (o.shadow !== false) {
     ctx.fillStyle = 'rgba(10,30,15,.28)';
     ctx.beginPath();
-    const sw = pose === 'dive' || pose === 'slide' ? 16 : 9.5;
+    const sw = pose === 'dive' || pose === 'slide' ? 9.5 + 6.5 * Math.max(0, Math.min(1, o.lay ?? 1)) : 9.5;
     ctx.ellipse(0, 0, sw * s, 3.4 * s, 0, 0, Math.PI * 2);
     ctx.fill();
   }
@@ -152,6 +203,11 @@ export function drawPlayer(ctx, c, x, y, o = {}) {
       break;
   }
   if (o.mouth) mouth = o.mouth;
+  // o.lay (0..1): how far a lying pose (dive, slide, tackle) has gone over.
+  // 0 = still upright in that pose's limbs, 1 = fully down (default). Ease it
+  // from 0 to 1 to animate going to ground, and back to 0 to get up, so the
+  // body never snaps between standing and lying in one frame.
+  if (o.lay != null) { const k = Math.max(0, Math.min(1, o.lay)); rot *= k; if (lift < 0) lift *= k; }
 
   ctx.translate(0, -lift);
   ctx.rotate(rot);
@@ -381,7 +437,7 @@ function drawHairFront(ctx, c, R, fx, t) {
   switch (c.hair) {
     case 'buzz': {
       ctx.save(); circle(ctx, 0, 0, R); ctx.clip();
-      ctx.fillStyle = hc; ctx.globalAlpha = 0.85;
+      ctx.fillStyle = hc; ctx.globalAlpha *= 0.85;
       ctx.beginPath(); ctx.ellipse(0, -R * 0.55, R * 1.05, R * 0.6, 0, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
       ctx.beginPath(); ctx.arc(0, 0, R, Math.PI * 1.08, Math.PI * 1.92); ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.stroke();
@@ -410,7 +466,7 @@ function drawHairFront(ctx, c, R, fx, t) {
       ctx.beginPath(); ctx.arc(0, -3, R + 5, Math.PI * 0.95, Math.PI * 2.05);
       ctx.quadraticCurveTo(0, -R * 0.35, -R - 4.5, -2);
       fillStroke(ctx, hc, 1.5);
-      ctx.fillStyle = hi; ctx.globalAlpha = 0.5;
+      ctx.fillStyle = hi; ctx.globalAlpha *= 0.5;
       for (const [x, y] of [[-6, -12], [2, -15], [8, -10], [-1, -9]]) { circle(ctx, x, y, 1.2); ctx.fill(); }
       break;
     }
@@ -538,6 +594,7 @@ export function spriteURL(c, size = 80, pose = 'idle') {
 
 // ---------------------------------------------------------------- ball
 export function drawBall(ctx, x, y, r = 5, spin = 0, height = 0) {
+  if (JANK && r >= 3) JANK.track(ctx, 'ball', 'b', x, y, ctx.globalAlpha);
   ctx.save();
   // shadow on the ground
   ctx.fillStyle = `rgba(10,30,15,${0.3 - Math.min(height, 40) / 200})`;

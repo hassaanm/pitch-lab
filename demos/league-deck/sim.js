@@ -10,6 +10,11 @@ export const STAT_KEYS = ['ctrl', 'atk', 'fin', 'def', 'prs', 'gk'];
 export const STAT_LABEL = { ctrl: 'Control', atk: 'Attack', fin: 'Finish', def: 'Defence', prs: 'Press', gk: 'Keeper' };
 
 export const SPELLS = 6;
+// key-moment tuning (defending)
+// scoring tuning (see NOTES.md: about 2–4 goals a match)
+export const XG_BASE = 0.055, XG_PER_FIN = 0.01, BIG_BASE = 0.2, BIG_MIN = 0.18, BIG_MULT = 3.0, TURN_XG = 0.07, COUNTER_XG = 0.08;
+export const RUSH_FOUL = 0.1, PEN_GOAL = 0.76, GUESS_RIGHT = 0.9, GUESS_WRONG = 0.15;
+export const STAY_K = 1.5, RUSH_BASE = 0.99, RUSH_K = 0.6, RUSH_PER_DRIBBLE = 0.085, READ_BASE = 0.555, READ_PER_SHOOT = 0.055;
 export const SPELL_MIN = 15;
 
 // ---------------------------------------------------------------- stats
@@ -73,8 +78,9 @@ export function spellStats(m, side) {
 // ---------------------------------------------------------------- odds
 export function pressP(A, D) { return 0.4 * sig((D.prs - A.ctrl) / 3); }
 export function progressP(A, D) { return 0.05 + 0.85 * sig((A.atk - (D.def - A.h.ignoreDef)) / 3); }
-export function chanceXg(A) { return clamp(0.085 + 0.013 * (A.fin - 10), 0.03, 0.35); }
-export function bigP(A, D) { return clamp(0.22 + 0.025 * (A.atk - D.def), 0.08, 0.5); }
+export function chanceXg(A) { return clamp(XG_BASE + XG_PER_FIN * (A.fin - 10), 0.03, 0.35); }
+export function bigP(A, D) { return clamp(BIG_BASE + 0.025 * (A.atk - D.def), BIG_MIN, 0.5); }
+export const bigXg = (xg) => Math.min(0.6, xg * BIG_MULT);
 export function goalP(xg, D) { return clamp(xg * (1 + (10 - D.gk) * 0.05), 0.02, 0.92); }
 export function counterP(A, D) { return clamp((0.12 + D.h.counter) * (1 + A.h.counterAgainst), 0, 0.7); }
 export function possShare(Y, O) { const a = Math.pow(Y.ctrl, 1.6), b = Math.pow(O.ctrl, 1.6); return a / (a + b); }
@@ -82,13 +88,13 @@ export function possShare(Y, O) { const a = Math.pow(Y.ctrl, 1.6), b = Math.pow(
 // Expected goals per possession owned by A (for A, and against A via turnovers/counters).
 function possExpect(A, D) {
   const pt = pressP(A, D);
-  const turnXg = goalP(0.1 + D.h.pressXg, A);
+  const turnXg = goalP(TURN_XG + D.h.pressXg, A);
   const pp = (1 - pt) * (1 - A.h.variance) * progressP(A, D);
   const xg = chanceXg(A);
   const bp = bigP(A, D);
-  const forA = pp * ((1 - bp) * goalP(xg, D) + bp * goalP(Math.min(0.6, xg * 3.2), D));
+  const forA = pp * ((1 - bp) * goalP(xg, D) + bp * goalP(bigXg(xg), D));
   const failed = (1 - pt) - pp;
-  const againstA = pt * turnXg + failed * counterP(A, D) * goalP(0.12 + D.h.counterXg, A);
+  const againstA = pt * turnXg + failed * counterP(A, D) * goalP(COUNTER_XG + D.h.counterXg, A);
   return { forA, againstA };
 }
 
@@ -135,8 +141,8 @@ export function genPossession(m, owner, Y, O) {
 
   if (r() < pressP(A, D)) {
     beats.push({ k: 'press', side: other, p: pressP(A, D) });
-    const xg = 0.1 + D.h.pressXg;
-    beats.push(chanceBeats(m, other, xg, xg >= 0.17, D, A, 'turnover'));
+    const xg = TURN_XG + D.h.pressXg;
+    beats.push(chanceBeats(m, other, xg, xg >= TURN_XG + 0.07, D, A, 'turnover'));
     return beats.flat();
   }
   beats.push({ k: 'pass', side: owner });
@@ -154,21 +160,24 @@ export function genPossession(m, owner, Y, O) {
       beats.push({ k: 'foul', side: other });
       beats.push(chanceBeats(m, owner, 0.07, false, A, D, 'freekick'));
     } else {
-      beats.push(chanceBeats(m, owner, big ? Math.min(0.6, xg * 3.2) : xg, big, A, D, A.h.header ? 'header' : 'open'));
+      beats.push(chanceBeats(m, owner, big ? bigXg(xg) : xg, big, A, D, A.h.header ? 'header' : 'open'));
     }
   } else {
     beats.push({ k: 'blocked', side: other });
     const pc = counterP(A, D);
     if (r() < pc) {
       beats.push({ k: 'counter', side: other, p: pc });
-      beats.push(chanceBeats(m, other, 0.12 + D.h.counterXg, false, D, A, 'counter'));
+      beats.push(chanceBeats(m, other, COUNTER_XG + D.h.counterXg, false, D, A, 'counter'));
     }
   }
   return beats.flat();
 }
 
+// The players on the pitch this spell (player cards swap people in); falls back to the base squad.
+export const onPitch = (m, side) => m[side].onPitch || m[side].squad;
+
 function chanceBeats(m, side, xg, big, A, D, kind) {
-  const squad = m[side].squad;
+  const squad = onPitch(m, side);
   let who = null;
   if (big && A.h.arm.length) { const a = A.h.arm[0]; who = a.who; }
   const shooter = pickShooter(squad, who);
@@ -192,7 +201,7 @@ export function momentOptions(m, beat, Y, O) {
     const arm = Y.h.arm[0];
     const xg = beat.xg + (arm ? arm.xg : 0);
     const shooter = beat.shooter;
-    const mate = m.you.squad.filter((p) => p.pos !== 'GK' && p.id !== shooter.id).sort((a, b) => b.stats.shoot - a.stats.shoot)[0];
+    const mate = onPitch(m, 'you').filter((p) => p.pos !== 'GK' && p.id !== shooter.id).sort((a, b) => b.stats.shoot - a.stats.shoot)[0];
     const passP = clamp(0.82 - 0.025 * (O.def - 10), 0.45, 0.95);
     const tapP = goalP(0.42, O);
     const roundP = clamp(0.2 + 0.05 * (shooter.stats.dribble - 5) + 0.03 * (Y.atk - O.def) / 2, 0.1, 0.65);
@@ -202,11 +211,21 @@ export function momentOptions(m, beat, Y, O) {
       { id: 'round', label: 'Round the keeper', p: roundP, detail: `${shooter.name}'s dribble ${shooter.stats.dribble}` },
     ];
   }
+  // Each option is best in a situation you can read from the shooter (tuned over every
+  // rival shooter and chance quality the player meets; see NOTES.md):
+  //   rush out   beats a poor dribbler (Dribble 6 or less);
+  //   guess      beats a sharp finisher (Finishing 8+) on a good chance: the sharper he
+  //              is, the more often Wak reads which side he will pick;
+  //   stay big   otherwise (a half chance, or a dribbler who is not a sharp finisher).
   const g = goalP(beat.xg, Y);
+  const sh = beat.shooter;
+  const stay = clamp(1 - g * STAY_K, 0.05, 0.97);
+  const rushSave = clamp(RUSH_BASE - g * RUSH_K - RUSH_PER_DRIBBLE * (sh.stats.dribble - 6), 0.05, 0.97);
+  const right = clamp(READ_BASE + READ_PER_SHOOT * (sh.stats.shoot - 6), 0.3, 0.8);
   return [
-    { id: 'stay', label: 'Wak stays big', p: 1 - g, detail: 'safe, average' },
-    { id: 'rush', label: 'Wak rushes out', p: clamp(1 - g * 0.65, 0, 0.95) * 0.85, detail: '15% foul → penalty' },
-    { id: 'guess', label: 'Wak guesses a side', p: 0.5 * 0.85 + 0.5 * 0.1, detail: '50/50: right side 85%, wrong 10%' },
+    { id: 'stay', label: 'Wak stays big', p: stay, detail: 'best on a half chance' },
+    { id: 'rush', label: 'Wak rushes out', p: rushSave * (1 - RUSH_FOUL) + RUSH_FOUL * (1 - PEN_GOAL), saveP: rushSave, detail: `vs dribble ${sh.stats.dribble} · ${Math.round(RUSH_FOUL * 100)}% pen risk` },
+    { id: 'guess', label: 'Wak guesses a side', p: right * GUESS_RIGHT + (1 - right) * GUESS_WRONG, right, detail: `reads finishing ${sh.stats.shoot}: ${Math.round(right * 100)}% right` },
   ];
 }
 
@@ -223,17 +242,17 @@ export function resolveMoment(m, beat, opt, Y, O) {
     return { result: goal ? 'goal' : (Math.random() < 0.6 ? 'save' : 'miss'), shooter: beat.shooter, round: opt.id === 'round' };
   }
   // defending
-  if (opt.id === 'rush' && Math.random() < 0.15) {
-    const goal = Math.random() < 0.76;
+  if (opt.id === 'rush' && Math.random() < RUSH_FOUL) {
+    const goal = Math.random() < PEN_GOAL;
     return { result: goal ? 'goal' : 'save', shooter: beat.shooter, penalty: true, text: goal ? 'Penalty… scored.' : 'Penalty… Wak saves it!' };
   }
   if (opt.id === 'guess') {
-    const right = Math.random() < 0.5;
-    const saved = Math.random() < (right ? 0.85 : 0.1);
-    return { result: saved ? 'save' : 'goal', shooter: beat.shooter, text: right ? 'Wak guessed right!' : 'Wak went the wrong way!' };
+    const right = Math.random() < (opt.right ?? 0.5);
+    const saved = Math.random() < (right ? GUESS_RIGHT : GUESS_WRONG);
+    return { result: saved ? 'save' : 'goal', shooter: beat.shooter, guess: right ? 'right' : 'wrong', text: right ? 'Wak guessed right' : 'Wak went the wrong way' };
   }
-  const saved = Math.random() < (opt.id === 'rush' ? opt.p / 0.85 : opt.p);
-  return { result: saved ? 'save' : 'goal', shooter: beat.shooter };
+  const saved = Math.random() < (opt.id === 'rush' ? opt.saveP : opt.p);
+  return { result: saved ? 'save' : 'goal', shooter: beat.shooter, rushed: opt.id === 'rush' };
 }
 
 // ---------------------------------------------------------------- AI coach
@@ -247,7 +266,7 @@ export function aiPlan(m, deck) {
     const c = CARDS[id];
     let v = Math.random() * 2;
     const fx = c.fx || {};
-    if (lead < 0 || (!late && lead === 0)) v += (fx.atk || 0) + (fx.fin || 0) + (fx.prs || 0) * 0.7 + (c.setPiece ? 3 : 0) + (c.ifTrailing ? 3 : 0);
+    if (lead < 0 || (!late && lead === 0)) v += (fx.atk || 0) + (fx.fin || 0) + (fx.prs || 0) * 0.7 + (c.setPiece ? 1 : 0) + (c.ifTrailing ? 3 : 0);
     if (lead > 0) v += (fx.def || 0) * 1.2 + (c.fewerPoss ? 3 : 0) + (c.counter ? 2 : 0);
     v += (fx.ctrl || 0) * 0.6 + (fx.def || 0) * 0.4;
     if (c.sta && m.opp.sta < 40 && c.sta < 0) v -= 4;

@@ -6,7 +6,7 @@ import { byId } from '../../shared/cast.js';
 export const SUITS = ['GK', 'DF', 'MF', 'FW'];
 export const SUIT_NAME = { GK: 'Keeper', DF: 'Defender', MF: 'Midfield', FW: 'Forward' };
 export const SUIT_CLS = { GK: 'defend', DF: 'skill', MF: 'power', FW: 'attack' };
-export const ROW_V = { FW: 0.2, MF: 0.45, DF: 0.68, GK: 0.91 };
+export const ROW_V = { FW: 0.3, MF: 0.52, DF: 0.73, GK: 0.92 };
 
 // Named stars of the Sunbirds; the rest of the squad is generated fillers.
 const STARS = { GK11: 'wak', DF2: 'ada', DF4: 'tomo', DF5: 'mo', MF7: 'pip', MF8: 'lupe', MF10: 'kenji', FW9: 'bruno', FW10: 'sol', FW11: 'rio' };
@@ -47,7 +47,7 @@ export const HANDS = [
   { id: 'line', name: 'Full Line', chips: 35, mult: 4, lc: 15, lm: 2, desc: '5 of the same position' },
   { id: 'tiki', name: 'Tiki-Taka', chips: 30, mult: 4, lc: 30, lm: 3, desc: '5 numbers in a row' },
   { id: 'hattrick', name: 'Hat-trick', chips: 30, mult: 3, lc: 20, lm: 2, desc: '3 of the same number' },
-  { id: 'buildup', name: 'Build-up', chips: 25, mult: 3, lc: 15, lm: 1, desc: 'a DF, an MF and an FW' },
+  { id: 'buildup', name: 'Build-up', chips: 25, mult: 2, lc: 15, lm: 1, desc: 'a DF, an MF and an FW' },
   { id: 'double', name: 'Double One-Two', chips: 20, mult: 2, lc: 20, lm: 1, desc: 'two pairs' },
   { id: 'onetwo', name: 'One-Two', chips: 10, mult: 2, lc: 15, lm: 1, desc: 'a pair' },
   { id: 'solo', name: 'Solo Run', chips: 5, mult: 1, lc: 10, lm: 1, desc: 'highest card only' },

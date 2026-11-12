@@ -1,26 +1,31 @@
 // Touchline: a league-by-league deckbuilder. Your deck is your tactics;
 // each 15-minute spell you play cards, then watch the match simulate.
-import { Shell, oddsPill, oddsClass } from '../../shared/shell.js';
-import { portrait, spriteURL } from '../../shared/art.js';
+// The match is drawn by the shared broadcast view (shared/matchview.js):
+// every change of possession is a physical contact, and every log line,
+// score change and banner is written on that contact frame (onHit).
+import { Shell, oddsPill } from '../../shared/shell.js';
+import { portrait } from '../../shared/art.js';
 import { sfx } from '../../shared/sfx.js';
 import { byId, LINEUP7, TEAMS, crestSVG } from '../../shared/cast.js';
+import { MatchView, SHAPE7 } from '../../shared/matchview.js';
 import { STYLES, COACHES, LEAGUES, CUP, DIVISIONS, CARDS, COACH_DECK, AI_DECK, opponentStats, clubSquad, rewardPool } from './data.js';
 import * as S from './sim.js';
-import { MatchView } from './view.js';
 
 const shell = new Shell({
   id: 'league-deck',
   title: 'Touchline',
-  pitch: 'You are the coach. Your deck is your tactics. Every 15 minutes you play cards, then the match plays itself out — and you step in on the big chances.',
+  pitch: 'You are the coach. Your deck is your tactics. Every 15 minutes you read the rival\'s plan, spend 3 Shouts on cards to tilt the duels, then watch the match play out, and you step in on the big chances.',
   how: [
     'Pick a coach and a league. Each league has 3 clubs, then its legendary coach.',
-    'Each spell (15 minutes) you get 3 📣 Shouts and 5 cards. Cards change your team\'s stats for that spell.',
-    'The rival coach shows their plan first. Read it, counter it. The odds update as you play cards.',
-    'Kick off to watch the spell. On a big chance, you choose what happens (with odds).',
+    'Each spell (15 minutes) you get 3 📣 Shouts and 5 cards. The rival coach shows their plan first.',
+    'Three duels decide every attack: Keep the ball (Control vs Press), Break the line (Attack vs Defence) and Score (Finish vs Keeper). The bars show both sides\' odds.',
+    'Tap a card to preview it: the bars show what it changes. Tap it again to play it. Tap a played card to take it back.',
+    'Kick off to watch the spell. When a card swings a duel, the pitch names it (your cards in gold, theirs in red). On a big chance you choose what happens.',
+    'Defending a big chance: rush out against a poor dribbler (Dribble 6 or less; small penalty risk). Guess a side against a sharp finisher (Finishing 8+) on a good chance: Wak reads sharp finishers more often. Otherwise stay big. The odds on each button show it.',
     'Win to draft a new card. Beat the legend to unlock that coach and their style.',
-    'Tap a played card to take it back. Keys: 1–7 play a card, Enter kicks off, D shows your deck.',
+    'Keys: 1–7 select / play a card, Enter kicks off, D shows your deck, U takes back the last card.',
   ],
-  notice: 'Does a deck + simulation keep soccer\'s flow while still giving you real decisions? Watch whether reading the rival\'s plan feels like coaching, and whether the big-chance moments are enough hands-on play.',
+  notice: 'Does reading the rival\'s plan and choosing which duels to win feel like coaching? Do the pitch labels make it clear which of your cards paid off?',
   phases: [
     { id: 'early', label: 'Kickoff', sub: 'New run · pick coach & league' },
     { id: 'mid', label: 'Midgame', sub: "La Lija · 45' · 1–1" },
@@ -41,10 +46,21 @@ let m = null;     // current match
 let view = null;
 let busy = false;
 let selCoach = 'rookie';
+let sel = -1;     // selected hand card
+let curMin = 0;
+let liveLines = [];
+let ready = Promise.resolve();
+let pitchW = 0;
+
+// Dev hook under ?jank=1: read the live match from the console (tests set the score).
+if (new URLSearchParams(location.search).has('jank')) window.__touchline = { get m() { return m; }, get run() { return run; } };
+
+function killView() { if (view) { view.destroy(); view = null; } window.onresize = null; }
 
 // ================================================================ phases
 function startPhase(id) {
   busy = false;
+  killView();
   if (id === 'early') { run = null; m = null; homeScreen(); return; }
   if (id === 'mid') {
     run = { coach: 'rookie', league: 'liga', round: 2, bonus: { ctrl: 1 },
@@ -53,14 +69,15 @@ function startPhase(id) {
     return;
   }
   if (id === 'clutch') {
-    run = { coach: 'tiki', league: 'bunda', round: 3, bonus: { ctrl: 1, atk: 1 },
+    run = { coach: 'tiki', league: 'bunda', round: 3, bonus: { ctrl: 1, atk: 2, fin: 2 },
       deck: [...COACH_DECK.tiki, 'switchplay', 'eagle', 'setpiece', 'watersub', 'hairdryer', 'lateshow', 'nutmeg'] };
-    startMatch({ spell: 5, score: [1, 2], youSta: 40, oppSta: 46 });
+    startMatch({ spell: 5, score: [1, 2], youSta: 60, oppSta: 46 });
   }
 }
 
 // ================================================================ home
 function homeScreen() {
+  window.scrollTo(0, 0);
   shell.setScore(null);
   const allBeaten = LEAGUES.every((l) => progress.beaten.includes(l.id));
   if (!progress.coaches.includes(selCoach)) selCoach = 'rookie';
@@ -84,7 +101,7 @@ function homeScreen() {
         <div class="grow"><h3>${l.name} ${done ? '✅' : ''}</h3>
           <span class="stylechip" style="background:${STYLES[l.style].color}">${STYLES[l.style].icon} ${STYLES[l.style].name}</span>
           <p>${l.lore}</p></div>
-        <div class="boss center"><img src="${portrait(boss.char, 54)}" alt=""><div style="font-size:10px;font-weight:900">${locked ? '🔒' : boss.name}</div></div>
+        <div class="boss center"><img src="${portrait(boss.char, 54)}" alt=""><div style="font-size:11px;font-weight:900">${locked ? '🔒' : boss.name}</div></div>
       </div>`;
     }).join('')}
     <div class="row wrap" style="justify-content:center;margin:8px 0 20px">
@@ -123,12 +140,13 @@ function opponentFor(round) {
 
 // ================================================================ ladder
 function ladderScreen() {
+  window.scrollTo(0, 0);
   shell.setScore(null);
   const L = leagueOf(run.league);
   const coach = COACHES[run.coach];
   stage.innerHTML = `<div class="screen">
     <div class="row"><button class="btn small ghost" id="home">◀ Leagues</button><div class="grow"></div><span class="deckinfo" id="deck">Your deck: ${run.deck.length} cards</span></div>
-    <div class="panel dark row"><img src="${portrait(coach.char, 48)}" style="border-radius:10px;border:3px solid var(--ink)" alt="">
+    <div class="panel dark row"><img src="${portrait(coach.char, 48)}" width="48" height="48" style="border-radius:10px;border:3px solid var(--ink);flex:none" alt="">
       <div><b style="font-family:var(--font-h);font-size:18px">${L.flag} ${L.name}</b><br><span style="font-size:12px">Coach: ${coach.name} · ${STYLES[coach.style].icon} ${STYLES[coach.style].name}</span></div></div>
     <div class="ladder">${L.clubs.map((clubId, i) => {
       const o = opponentFor(i);
@@ -137,8 +155,8 @@ function ladderScreen() {
       return `<div class="rung panel ${i === run.round ? 'cur' : ''} ${i < run.round ? 'past' : ''}">
         <div class="num">${L.id === 'cup' ? ['Round of 16', 'Quarter-final', 'Semi-final', 'Final'][i] : DIVISIONS[i]}</div>
         <div class="kit" style="background:linear-gradient(90deg, ${t.shirt} 50%, ${t.trim} 50%)"></div>
-        <div class="grow"><b style="font-family:var(--font-h);font-size:16px">${t.name}</b><br><span style="font-size:11px">${STYLES[o.style].icon} ${STYLES[o.style].name}${boss ? ` · Legendary coach: <b>${boss.name}</b>` : ''}</span></div>
-        ${boss ? `<img src="${portrait(boss.char, 44)}" style="border-radius:8px;border:2px solid var(--ink)" alt="">` : (i < run.round ? '✅' : '')}
+        <div class="grow"><b style="font-family:var(--font-h);font-size:16px">${t.name}</b><br><span style="font-size:11px">${STYLES[o.style].icon} ${STYLES[o.style].name}${boss ? ` · Legend: <b>${boss.name}</b>` : ''}</span></div>
+        ${boss ? `<img src="${portrait(boss.char, 44)}" width="44" height="44" style="border-radius:8px;border:2px solid var(--ink);flex:none" alt="">` : (i < run.round ? '✅' : '')}
       </div>`;
     }).join('')}</div>
     <button class="btn big block" id="play">Play ${TEAMS[L.clubs[run.round]].name} ▶</button>
@@ -148,15 +166,53 @@ function ladderScreen() {
   stage.querySelector('#play').onclick = () => { sfx.whistle(); startMatch({}); };
 }
 
+// Full-size card (deck viewer, rewards).
 function cardHTML(id, o = {}) {
   const c = CARDS[id];
   const st = STYLES[c.style];
   const who = c.who ? byId[c.who] : null;
   const art = who ? `<div class="art" style="background-image:url(${portrait(who, 104)})"></div>` : `<div class="art tac">${c.icon || '⚽'}</div>`;
-  const cost = o.cost ?? c.cost;
-  return `<div class="gcard ${c.type === 'player' ? 'player' : ''} ${o.cls || ''}" style="--cc:${st.color};${o.style || ''}" data-id="${id}" ${o.idx != null ? `data-idx="${o.idx}"` : ''} tabindex="0">
-    <div class="cost" ${cost < c.cost ? 'style="background:#6fd36a"' : ''}>${cost}</div><div class="name" ${c.name.length > 13 ? 'style="font-size:10px"' : ''}>${c.name}</div>${art}
-    <div class="type">${st.icon} ${st.name} · ${c.type}</div><div class="text">${c.text}</div>${o.key ? `<span class="kbdh">${o.key}</span>` : ''}</div>`;
+  return `<div class="gcard ${c.type === 'player' ? 'player' : ''} ${o.cls || ''}" style="--cc:${st.color}" data-id="${id}" tabindex="0">
+    <div class="cost">${c.cost}</div><div class="name" ${c.name.length > 13 ? 'style="font-size:11px"' : ''}>${c.name}</div>${art}
+    <div class="type">${st.icon} ${st.name} · ${c.type}</div><div class="text">${c.text}</div></div>`;
+}
+
+// Compact hand card: cost, icon or portrait, name, a two-line effect summary.
+const SHORT = { ctrl: 'Ctrl', atk: 'Atk', fin: 'Fin', def: 'Def', prs: 'Press', gk: 'GK' };
+function fxSummary(c) {
+  const out = [];
+  const sgn = (v) => (v > 0 ? '+' : '−') + Math.abs(v);
+  for (const k in c.fx || {}) out.push(`${sgn(c.fx[k])} ${SHORT[k]}`);
+  for (const k in c.oppFx || {}) out.push(`Their ${SHORT[k]} ${sgn(c.oppFx[k])}`);
+  if (c.ifTrailing) out.push('If losing: +Atk');
+  if (c.ifCtrlLead) out.push('+2 Atk if more Ctrl');
+  if (c.ifLeading) out.push('If leading +1 Def');
+  if (c.lateFin) out.push(`+${c.lateFin} Fin after 75'`);
+  if (c.pressXg) out.push('Steals → big chance');
+  if (c.counter) out.push(`+${Math.round(c.counter * 100)}% counters`);
+  if (c.counterAgainst) out.push('Halves their counters');
+  if (c.bypass) out.push('Skip their defence');
+  if (c.setPiece) out.push(`Corner: ${Math.round(c.setPiece * 100)}% goal`);
+  if (c.arm) out.push(`1v1 +${Math.round(c.arm.xg * 100)}%`);
+  if (c.variance) out.push(`${Math.round(c.variance * 100)}% lose it`);
+  if (c.cancelBig) out.push('Stop a big chance');
+  if (c.fewerPoss) out.push(`−${c.fewerPoss} possessions`);
+  if (c.ignoreDef) out.push(`Ignore ${c.ignoreDef} Def`);
+  if (c.header) out.push('Headers');
+  if (c.onGoalShout) out.push('Goal: +1 Shout');
+  if (c.drawPerSpell) out.push('+1 card each spell');
+  if (c.sta) out.push(`${sgn(c.sta)} legs`);
+  if (c.perm && !c.drawPerSpell) out.unshift('Rest of match:');
+  return out.slice(0, c.perm ? 3 : 2).join('<br>');
+}
+function miniCard(id, i, cost, cant) {
+  const c = CARDS[id];
+  const st = STYLES[c.style];
+  const who = c.who ? byId[c.who] : null;
+  const ic = who ? `<div class="ic" style="background-image:url(${portrait(who, 64)})"></div>` : `<div class="ic">${c.icon || '⚽'}</div>`;
+  return `<div class="mcard ${cant ? 'cant' : ''} ${i === sel ? 'sel' : ''}" style="--cc:${st.color}" data-idx="${i}" role="button" tabindex="0">
+    <div class="cost" ${cost < c.cost ? 'style="background:#6fd36a"' : ''}>${cost}</div>${ic}
+    <div class="nm ${(who ? c.name.replace(/^[^:]+:\s*/, '') : c.name).split(' ').some((w) => w.length > 8) ? 'long' : ''}">${who ? c.name.replace(/^[^:]+:\s*/, '') : c.name}</div><div class="fx">${fxSummary(c)}</div></div>`;
 }
 
 function showDeck() {
@@ -174,55 +230,71 @@ function startMatch(o) {
   const base = { ctrl: 10, atk: 10, fin: 10, def: 10, prs: 10, gk: 10 };
   for (const k in run.bonus) base[k] += run.bonus[k];
   const variant = opp.isBoss ? 'night' : L.variant;
-  m = {
-    league: L, opp: null, you: null, spell: o.spell || 0, score: o.score ? [...o.score] : [0, 0], variant, oppInfo: opp,
-  };
+  m = { league: L, opp: null, you: null, spell: o.spell || 0, score: o.score ? [...o.score] : [0, 0], variant, oppInfo: opp };
   const youSquad = LINEUP7.sun.map((id) => byId[id]);
   m.you = { coach: run.coach, base, perm: {}, permOpp: {}, permHooks: { staPerSpell: 0, drawPerSpell: 0 }, sta: o.youSta ?? 100,
-    draw: S.shuffle(run.deck), discard: [], hand: [], played: [], log: [], shouts: 3, squad: youSquad, bench: ['bruno', 'pip', 'sol'].map((id) => byId[id]), exhausted: [] };
+    draw: S.shuffle(run.deck), discard: [], hand: [], played: [], playLog: [], log: [], shouts: 3, squad: youSquad };
   m.opp = { coach: opp.coach, base: opponentStats(run.round, opp.style, opp.isBoss), perm: {}, permOpp: {}, permHooks: { staPerSpell: 0 }, sta: o.oppSta ?? 100,
     played: [], shouts: 3, squad: clubSquad(opp.clubId), deck: AI_DECK[opp.style], clubId: opp.clubId };
+  shell.clearLog();
   matchScreen();
-  beginSpell(true);
   const oc = opp.coach ? COACHES[opp.coach] : null;
-  shell.log(`${TEAMS[opp.clubId].name}${oc ? ` (coach ${oc.name})` : ''} — ${STYLES[opp.style].name} style.`, 'info', `${m.spell * 15}'`);
+  curMin = m.spell * 15;
+  say(`${TEAMS[opp.clubId].name}${oc ? ` (coach ${oc.name})` : ''}: ${STYLES[opp.style].name} style.`, 'info');
+  beginSpell(true);
+  fitPitch();
+  view.setTeams(squadList(currentSquad()), squadList(m.opp.squad));
+  // kick-off: the first half is yours, the second half theirs
+  ready = view.reset(m.spell >= 3 ? 'opp' : 'you');
+}
+
+const squadList = (sq) => sq.map((c, i) => ({ c, home: SHAPE7[i] }));
+
+// The pitch gets one height per match, chosen so that the pitch, the ticker and the
+// whole planning panel (with Kick off) fit one phone screen. It changes only when
+// the width changes (phone URL bars change innerHeight while scrolling).
+let pitchH = 300;
+function pitchHeight(w) { return Math.round(Math.min(w * 1.15, pitchH)); }
+function fitPitch() {
+  const wrap = stage.querySelector('.pitchwrap'), panel = stage.querySelector('#mpanel'), ticker = stage.querySelector('#ticker');
+  const top = document.querySelector('.topbar')?.offsetHeight || 56;
+  const tabs = document.querySelector('.phasebar');
+  const gapAbove = tabs ? Math.max(4, wrap.getBoundingClientRect().top - tabs.getBoundingClientRect().bottom) : 8;
+  const used = top + gapAbove + 6 + ticker.offsetHeight + 16 + panel.offsetHeight + 10;
+  pitchH = Math.round(Math.max(240, Math.min(420, innerHeight - used)));
+  pitchW = wrap.clientWidth;
+  view.resize(pitchW, pitchHeight(pitchW), m.variant);
+  // start the match screen with the pitch right under the top bar (phase tabs hidden)
+  const align = () => {
+    const t = document.querySelector('.phasebar');
+    const y = t ? t.getBoundingClientRect().bottom + scrollY - top : wrap.getBoundingClientRect().top + scrollY - top - gapAbove;
+    window.scrollTo(0, Math.max(0, Math.round(y)));
+    return scrollY;
+  };
+  const at = align();
+  // web fonts can change the tab bar's height after this; re-align once if nobody scrolled
+  document.fonts?.ready.then(() => { if (Math.abs(scrollY - at) < 2 && stage.contains(wrap)) align(); });
 }
 
 function matchScreen() {
-  const T = TEAMS[m.opp.clubId];
-  stage.innerHTML = `<div class="screen">
-    <div class="pitchwrap"><canvas id="pitch"></canvas><div class="spellbadge" id="spellbadge"></div>
-      <div class="simctl" id="simctl" hidden><button class="btn small paper" data-sp="1">×1</button><button class="btn small paper" data-sp="2">×2</button><button class="btn small paper" data-sp="5">⏭</button></div>
-    </div>
-    <div class="intent panel dark" id="intent"></div>
-    <div class="played" id="played"></div>
-    <div class="hand" id="hand"></div>
-    <div class="compare panel" id="compare"></div>
-    <div class="bottombar"><div><div class="shouts" id="shouts"></div><div class="miniproj" id="miniproj"></div><div class="deckinfo" id="deckinfo"></div></div>
-      <button class="btn big" id="kick">Kick off ▶</button></div>
+  stage.innerHTML = `<div class="screen match">
+    <div class="pitchwrap"><canvas id="pitch"></canvas><div class="spellbadge" id="spellbadge"></div></div>
+    <div class="ticker" id="ticker">&nbsp;</div>
+    <div class="mpanel panel dark" id="mpanel"></div>
   </div>`;
+  killView();
   const cv = stage.querySelector('#pitch');
-  if (view) view.running = false;
   view = new MatchView(cv);
-  fitPitch();
-  window.onresize = () => fitPitch();
-  view.setTeams(currentSquad(), m.opp.squad);
-  stage.querySelector('#kick').onclick = () => kickOff();
-  stage.querySelector('#deckinfo').onclick = () => showDeck();
-  stage.querySelectorAll('[data-sp]').forEach((b) => b.onclick = () => { view.speed = +b.dataset.sp; sfx.click(); markSpeed(); });
-  markSpeed();
-  void T;
+  // The pitch keeps its size for the whole match; only a real width change resizes it
+  // (phone URL bars change innerHeight while scrolling, which must not move anything).
+  window.onresize = () => {
+    const w = stage.querySelector('.pitchwrap')?.clientWidth;
+    if (!view || !w || Math.abs(w - pitchW) < 2) return;
+    pitchW = w;
+    view.resize(w, pitchHeight(w), m.variant);
+  };
+  liveLines = [];
 }
-// Compact pitch while choosing cards; tall pitch while the spell plays.
-function fitPitch() {
-  const wrap = stage.querySelector('.pitchwrap');
-  if (!wrap || !view) return;
-  const w = wrap.clientWidth;
-  const tall = busy;
-  const h = Math.round(tall ? Math.min(w * 1.1, Math.max(320, innerHeight * 0.62)) : Math.min(w * 0.62, 330));
-  view.resize(w, h, m.variant);
-}
-function markSpeed() { stage.querySelectorAll('[data-sp]').forEach((b) => b.classList.toggle('pressed', +b.dataset.sp === view.speed)); }
 
 // Player cards bring that player onto the pitch for the spell.
 function currentSquad() {
@@ -238,73 +310,216 @@ function currentSquad() {
   return sq;
 }
 
+// ================================================================ commentary
+function say(text, kind = '') {
+  shell.log(text, kind, `${curMin}'`);
+  const t = stage.querySelector('#ticker');
+  if (t) { t.innerHTML = `<b>${curMin}'</b> ${text}`; t.className = 'ticker ' + kind; }
+  liveLines.unshift({ text, kind, min: curMin });
+  liveLines.length = Math.min(liveLines.length, 3);
+  const c = stage.querySelector('#comm');
+  if (c) c.innerHTML = commHTML();
+}
+const commHTML = () => liveLines.map((l) => `<li class="${l.kind}"><span class="t">${l.min}'</span><span>${l.text}</span></li>`).join('') || '<li class="info"><span class="t"></span>Kick-off.</li>';
+const nm = (a) => a?.c?.name || '';
+const teamName = (side) => (side === 'you' ? 'Sunbirds' : TEAMS[m.opp.clubId].name);
+
+// Card credit: name a card only if its effect really applied to this beat, and
+// pick the one that moved that duel most. Conditions are read as they stood at
+// kick-off, because that is when the spell's stats were fixed. No card: the
+// label names the duel (or stays quiet) and the log line gives the duel's odds.
+function effOf(c, side) {
+  const lead = m.kickLead?.[side] ?? 0;
+  const e = {};
+  const add = (fx) => { for (const k in fx || {}) e[k] = (e[k] || 0) + fx[k]; };
+  add(c.fx);
+  if (c.ifTrailing && lead < 0) add(c.ifTrailing);
+  if (c.ifLeading && lead > 0) add(c.ifLeading);
+  if (c.lateFin && m.spell * S.SPELL_MIN >= 75) e.fin = (e.fin || 0) + c.lateFin;
+  if (c.ifCtrlLead && m.kickCtrlLead?.[side]) add(c.ifCtrlLead);
+  return e;
+}
+const WEIGHT = {
+  ball: (c, e) => e.ctrl || 0,
+  keep: (c, e) => e.ctrl || 0,
+  press: (c, e) => e.prs || 0,
+  progress: (c, e) => (e.atk || 0) + (c.ignoreDef || 0) - (c.oppFx?.def || 0),
+  block: (c, e) => e.def || 0,
+  // big chances: 'shoot' uses Finish and the armed bonus, 'round' uses Attack, a square tap-in uses neither
+  goal: (c, e, o) => o.moment === 'square' ? 0 : o.moment === 'round' ? (e.atk || 0)
+    : (e.fin || 0) + (o.moment === 'shoot' && c.arm ? 4 : 0) + (o.header && c.header ? 2 : 0)
+    + (o.kind === 'turnover' && c.pressXg ? 3 : 0) + (o.kind === 'counter' && c.counterXg ? 3 : 0),
+  save: (c, e) => (e.gk || 0) - (c.oppFx?.fin || 0),
+  miss: (c) => -(c.oppFx?.fin || 0),
+  counter: (c) => (c.counter || 0) * 10 + (c.counterXg || 0) * 20,
+  skill: (c) => c.bypass || 0,
+  lost: (c) => c.variance || 0,
+  foul: (c) => c.cancelBig || 0,
+};
+function credit(side, kind, o = {}) {
+  if (o.setPiece) return CARDS[o.setPiece]; // a set-piece chance belongs to its card
+  let best = null, bv = 0;
+  for (const id of m[side].played) {
+    const c = CARDS[id];
+    const v = WEIGHT[kind](c, effOf(c, side), o);
+    if (v > bv) { bv = v; best = c; }
+  }
+  return best;
+}
+// Labels read from the player's point of view: your cards in gold, theirs in red.
+const TAIL = {
+  ball: ['our ball', 'their ball'], keep: ['kept it', 'they keep it'], press: ['won it!', 'they win it'],
+  progress: ['through!', "they're through"], block: ['blocked!', 'they block it'], save: ['saved!', 'they save it'],
+  miss: ['wide!', 'wide'], counter: ['COUNTER!', 'they counter'], skill: ['skipped past!', 'they skip past'],
+  lost: ['backfires', 'backfires'], foul: ['chance stopped', 'chance stopped'], corner: ['corner!', 'their corner'],
+};
+const cardTag = (c) => `${c.icon || '👤'} ${c.name}`;
+// { label, color } for the canvas; `side` owns the card.
+function lbl(card, side, kind, fallback) {
+  if (!card) return { label: fallback, color: undefined };
+  return { label: `${cardTag(card)} → ${TAIL[kind][side === 'you' ? 0 : 1]}`, color: side === 'you' ? '#FFD23F' : '#FF8A80' };
+}
+const why = (card) => (card ? ` <i class="why">${cardTag(card)}</i>` : '');
+const good = (side) => (side === 'you' ? 'good' : 'bad');
+
 // ================================================================ spells
 function beginSpell(first = false) {
   const me = m.you;
   me.played = []; me.playLog = [];
   me.shouts = 3 + (run.coach === 'thunder' && m.spell >= 4 ? 1 : 0) + (me.bonusShout || 0);
   me.bonusShout = 0;
-  drawCardsFor(5 + me.permHooks.drawPerSpell + (m.spell === 3 && !first ? 1 : 0));
+  S.drawCards(me, 5 + me.permHooks.drawPerSpell + (m.spell === 3 && !first ? 1 : 0));
   m.opp.shouts = 2 + (m.oppInfo.isBoss ? 1 : 0) + (m.oppInfo.isBoss && m.spell >= 4 ? 1 : 0);
-  m.opp.played = [];
   m.opp.played = S.aiPlan(m, m.opp.deck);
-  if (m.spell === 3 && !first) shell.log('Half-time team talk: draw 1 extra card.', 'info', "45'");
-  render();
+  // a player card lasts one spell: whoever came on jogs off and the regular comes back
+  me.onPitch = currentSquad();
+  if (!first) view.syncTeam('you', squadList(me.onPitch));
+  if (m.spell === 3 && !first) say('Half-time team talk: draw 1 extra card.', 'info');
+  sel = -1;
+  planPanel();
 }
 
-function drawCardsFor(n) { S.drawCards(m.you, n); }
+function setPanel(html, cls) {
+  const p = stage.querySelector('#mpanel');
+  // hold the page height while the content swaps, so nothing below jumps
+  p.style.minHeight = p.offsetHeight ? p.offsetHeight + 'px' : '';
+  p.className = 'mpanel panel dark ' + (cls || '');
+  p.innerHTML = html;
+  return p;
+}
 
-function render() {
+function duelsHTML() {
+  const row = (k, name, sub) => `<div class="drow" data-row="${k}"><div class="dname">${name}<small>${sub}</small></div>
+    <div class="dcell" data-side="you"><div class="dbar"><i></i><b></b></div></div>
+    <div class="dcell" data-side="opp"><div class="dbar opp"><i></i><b></b></div></div></div>`;
+  return `<div class="duels"><div class="dhead"><span class="dname" id="dsub"></span><span>You attack <em id="pY"></em></span><span>They attack <em id="pO"></em></span></div>
+    ${row('keep', 'Keep the ball', 'Ctrl v Press')}${row('break', 'Break the line', 'Atk v Def')}${row('score', 'Score a chance', 'Fin v GK')}</div>`;
+}
+function duelNumbers(P) {
+  const Y = P.Y, O = P.O;
+  return {
+    you: { keep: [1 - P.pressO, Y.ctrl, O.prs], break: [P.progY, Y.atk, O.def], score: [S.goalP(S.chanceXg(Y), O), Y.fin, O.gk] },
+    opp: { keep: [1 - P.pressY, O.ctrl, Y.prs], break: [P.progO, O.atk, Y.def], score: [S.goalP(S.chanceXg(O), Y), O.fin, Y.gk] },
+  };
+}
+// Update bars in place so widths animate. `prev` marks what a previewed card changes.
+function updateDuels(P, prev) {
+  const N = duelNumbers(P), B = prev ? duelNumbers(prev) : null;
+  // the header carries the spell's bottom line: each side's chance to score this spell
+  const set = (id, h) => { const e = stage.querySelector('#' + id); if (e) e.innerHTML = h; };
+  set('dsub', `Score this spell<small>${P.n} attacks each</small>`);
+  set('pY', oddsPill(P.pY));
+  set('pO', oddsPill(P.pO));
+  for (const side of ['you', 'opp']) for (const k of ['keep', 'break', 'score']) {
+    const cell = stage.querySelector(`.drow[data-row="${k}"] .dcell[data-side="${side}"]`);
+    if (!cell) continue;
+    const [p, a, d] = N[side][k];
+    cell.querySelector('i').style.width = `${Math.round(p * 100)}%`;
+    const delta = B ? Math.round(p * 100) - Math.round(B[side][k][0] * 100) : 0;
+    cell.querySelector('b').innerHTML = `${Math.round(p * 100)}%${delta ? `<em class="${(delta > 0) === (side === 'you') ? 'up' : 'down'}">${delta > 0 ? '+' : ''}${delta}</em>` : ''}`;
+    cell.title = `${fmt(a)} v ${fmt(d)}`;
+    cell.classList.toggle('changed', !!delta);
+  }
+}
+const fmt = (v) => (Math.round(v * 10) / 10).toString();
+
+function planPanel() {
+  const oc = m.oppInfo.coach ? COACHES[m.oppInfo.coach] : null;
+  const T = TEAMS[m.opp.clubId];
+  setPanel(`
+    <div class="rival">${oc ? `<img src="${portrait(oc.char, 30)}" width="30" height="30" alt="">` : `<div class="crest">${crestSVG('red', 24).replace(/#E8463A/g, T.shirt)}</div>`}
+      <span class="lbl">${oc ? oc.name.split(' ').pop() : 'They'} plan:</span>
+      <div class="chips">${m.opp.played.length ? m.opp.played.map((id) => { const c = CARDS[id]; return `<span class="ichip" data-tip="${c.name}: ${c.text}"><i style="background:${STYLES[c.style].color}">${c.icon || '👤'}</i>${c.name}</span>`; }).join('') : '<span class="ichip">Nothing special</span>'}</div></div>
+    ${duelsHTML()}
+    <div class="infoline" id="infoline"></div>
+    <div class="hand" id="hand"></div>
+    <div class="planbar"><div><div class="shouts" id="shouts"></div><div class="deckinfo" id="deckinfo"></div></div>
+      <button class="btn" id="kick">Kick off ▶</button></div>`, 'plan');
+  const p = stage.querySelector('#mpanel');
+  p.querySelector('#kick').onclick = () => kickOff();
+  p.querySelector('#deckinfo').onclick = () => showDeck();
+  p.querySelectorAll('.ichip').forEach((el) => el.onclick = () => { sfx.click(); info(el.dataset.tip); });
+  renderPlan();
+  requestAnimationFrame(() => { if (p.isConnected) p.style.minHeight = ''; });
+}
+
+function info(html) { const el = stage.querySelector('#infoline'); if (el) el.innerHTML = `<div class="it">${html}</div>`; }
+
+function previewProjection(id) {
+  const me = m.you, c = CARDS[id];
+  const perm = { ...me.perm };
+  if (c.perm) for (const k in c.fx || {}) perm[k] = (perm[k] || 0) + c.fx[k];
+  const permOpp = { ...me.permOpp };
+  if (c.perm) for (const k in c.oppFx || {}) permOpp[k] = (permOpp[k] || 0) + c.oppFx[k];
+  return S.projection({ ...m, you: { ...me, played: [...me.played, id], perm, permOpp, sta: Math.max(0, Math.min(100, me.sta + (c.sta || 0))) } });
+}
+
+function renderPlan() {
   if (!m) return;
   const me = m.you;
   shell.setScore({ home: m.score[0], away: m.score[1], clock: `${m.spell * 15}'`, awayTeam: 'red' });
-  stage.querySelector('#spellbadge').textContent = `Spell ${m.spell + 1}/6 · ${m.spell * 15}'–${m.spell * 15 + 15}'`;
-  // rival plan
-  const oc = m.oppInfo.coach ? COACHES[m.oppInfo.coach] : null;
-  const T = TEAMS[m.opp.clubId];
-  stage.querySelector('#intent').innerHTML = `
-    ${oc ? `<img src="${portrait(oc.char, 50)}" alt="">` : `<div style="flex:none">${crestSVG('red', 44).replace(/#E8463A/g, T.shirt)}</div>`}
-    <div class="grow"><div class="lbl">${oc ? oc.name : T.name + "'s coach"} plans this spell:</div>
-      <div class="chips">${m.opp.played.length ? m.opp.played.map((id) => { const c = CARDS[id]; return `<span class="ichip" title="${c.text}"><i style="background:${STYLES[c.style].color}">${c.icon || '👤'}</i>${c.name}</span>`; }).join('') : '<span class="ichip">Nothing special</span>'}</div>
-      <div class="desc">${m.opp.played.map((id) => CARDS[id].text).join(' · ')}</div></div>`;
-  // stat compare + projection
+  stage.querySelector('#spellbadge').textContent = m.spell >= S.SPELLS ? `ET ${m.spell * 15}'–${m.spell * 15 + 15}'` : `${m.spell + 1}/6 · ${m.spell * 15}'–${m.spell * 15 + 15}'`;
+  if (!stage.querySelector('#hand')) return;
   const P = S.projection(m);
-  const rows = ['ctrl', 'atk', 'def', 'prs', 'fin', 'gk'];
-  const baseY = S.spellStats({ ...m, you: { ...me, played: [] }, opp: m.opp }, 'you');
-  stage.querySelector('#compare').innerHTML = '<div class="cgrid">' + ['ctrl', 'def', 'atk', 'prs', 'fin', 'gk'].map((k) => {
-    const y = P.Y[k], o = P.O[k], b = baseY[k];
-    const cls = y > b + 0.05 ? 'up' : y < b - 0.05 ? 'down' : '';
-    return `<div class="crow"><span>${S.STAT_LABEL[k]}</span><span class="v ${cls}">${fmt(y)}</span><div class="sbar"><i style="width:${(y / (y + o)) * 100}%"></i></div><span class="v">${fmt(o)}</span></div>`;
-  }).join('') + `</div>
-    <div class="proj">Ball ${oddsPill(P.share)} · You score ${oddsPill(P.pY)} · They score ${oddsPill(P.pO)}</div>
-    <div class="proj" style="font-size:11px;opacity:.75">Their press wins it ${Math.round(P.pressO * 100)}% · You break their line ${Math.round(P.progY * 100)}% · ${P.n} possessions</div>
-    <div class="staline"><span>Your legs</span><div class="stabar"><i style="width:${me.sta}%"></i></div><span>${Math.round(me.sta)}</span>
-      <span>Theirs</span><div class="stabar opp"><i style="width:${m.opp.sta}%"></i></div><span>${Math.round(m.opp.sta)}</span></div>
-    ${P.Y.h.fatigue > 0.2 ? `<div class="proj" style="color:var(--bad)">😮‍💨 Tired: −${fmt(P.Y.h.fatigue)} Attack/Defence, more to Press</div>` : ''}`;
-  stage.querySelector('#miniproj').innerHTML = `⚽ ${oddsPill(P.share)} You ${oddsPill(P.pY)} Them ${oddsPill(P.pO)}`;
-  // played
-  stage.querySelector('#played').innerHTML = me.played.length
-    ? me.played.map((id, i) => `<span class="pchip" data-pi="${i}" title="Tap to take back">${CARDS[id].icon || '👤'} ${CARDS[id].name}</span>`).join('')
-    : `<span class="muted" style="font-size:12px">Play cards from your hand. Played cards show here — tap one to take it back.</span>`;
-  stage.querySelectorAll('.pchip').forEach((el) => el.onclick = () => undoCard(+el.dataset.pi));
+  const selId = sel >= 0 ? me.hand[sel] : null;
+  const PP = selId ? previewProjection(selId) : null;
+  updateDuels(PP || P, PP ? P : null);
+  const Q = PP || P;
+  const legs = Math.round(PP ? Math.max(0, Math.min(100, me.sta + (CARDS[selId].sta || 0))) : me.sta);
+  if (selId) {
+    const c = CARDS[selId];
+    const cost = S.cardCost(m, selId);
+    // keep what you have already played in view while previewing (as a compact count)
+    const pl = me.played.length ? `<span class="plcount" title="${me.played.map((id) => CARDS[id].name).join(', ')}">${me.played.map((id) => CARDS[id].icon || '👤').join('')}</span> ` : '';
+    info(`${pl}<b>${c.name}</b> · ${c.text} <span class="tapagain">${cost > me.shouts ? `Needs ${cost} 📣` : 'Tap again to play'}</span>`);
+  } else if (me.played.length) {
+    // the played cards share this line (tap one to take it back); it never wraps
+    info(`<div class="played">${me.played.map((id, i) => `<span class="pchip" data-pi="${i}" title="Tap to take back">${CARDS[id].icon || '👤'} ${CARDS[id].name}<i>↩</i></span>`).join('')}</div>`);
+    stage.querySelectorAll('#infoline .pchip').forEach((el) => el.onclick = () => undoCard(+el.dataset.pi));
+  } else {
+    info(`Read their plan, then pick the duels to win. <span class="muted">Tap a card to preview it.</span>`);
+  }
   // hand
   const hand = stage.querySelector('#hand');
-  const n = me.hand.length;
-  hand.innerHTML = me.hand.map((id, i) => {
-    const cost = S.cardCost(m, id);
-    const rot = (i - (n - 1) / 2) * 4;
-    return cardHTML(id, { idx: i, cost, key: i + 1, cls: cost > me.shouts ? 'cant' : '', style: `transform:rotate(${rot}deg) translateY(${Math.abs(rot) * 1.2}px)` });
-  }).join('') || '<span class="muted">No cards left in hand.</span>';
-  hand.querySelectorAll('.gcard').forEach((el) => {
-    el.onclick = () => playCard(+el.dataset.idx);
-    el.onmouseenter = () => { el.dataset.t = el.style.transform; el.style.transform = 'translateY(-14px) scale(1.06)'; };
-    el.onmouseleave = () => { el.style.transform = el.dataset.t || ''; };
+  hand.classList.toggle('many', me.hand.length > 5);
+  hand.innerHTML = me.hand.map((id, i) => { const cost = S.cardCost(m, id); return miniCard(id, i, cost, cost > me.shouts); }).join('') || '<span class="muted">No cards left in hand.</span>';
+  hand.querySelectorAll('.mcard').forEach((el) => {
+    el.onclick = () => tapCard(+el.dataset.idx);
   });
-  stage.querySelector('#shouts').innerHTML = `📣 ${Array.from({ length: Math.max(3, me.shouts + me.played.reduce((a, _, i) => a + (me.playLog[i]?.cost || 0), 0)) }, (_, i) => `<span class="gem ${i < me.shouts ? '' : 'off'}"></span>`).join('')}`;
-  stage.querySelector('#deckinfo').textContent = `Draw ${me.draw.length} · Discard ${me.discard.length} · Deck ${run.deck.length}`;
+  const total = 3 + (run.coach === 'thunder' && m.spell >= 4 ? 1 : 0);
+  const spent = me.playLog.reduce((a, x) => a + x.cost, 0);
+  stage.querySelector('#shouts').innerHTML = `📣 ${Array.from({ length: Math.max(total, me.shouts + spent) }, (_, i) => `<span class="gem ${i < me.shouts ? '' : 'off'}"></span>`).join('')}`;
+  stage.querySelector('#deckinfo').innerHTML = `Legs ${legs} v ${Math.round(m.opp.sta)}${Q.Y.h.fatigue > 0.2 ? ' <b class="tired">tired</b>' : ''} · Deck ${me.draw.length}/${run.deck.length}`;
   stage.querySelector('#kick').textContent = m.spell >= S.SPELLS ? 'Extra time ▶' : `Kick off ${m.spell * 15}' ▶`;
 }
-const fmt = (v) => (Math.round(v * 10) / 10).toString();
+
+function tapCard(i) {
+  if (busy || !m.you.hand[i]) return;
+  if (sel === i) { playCard(i); return; }
+  sfx.deal();
+  sel = i;
+  renderPlan();
+}
 
 function playCard(i) {
   if (busy) return;
@@ -314,6 +529,7 @@ function playCard(i) {
   const cost = S.cardCost(m, id);
   if (cost > me.shouts) { sfx.bad(); shell.toast(`Not enough 📣 Shouts (${cost} needed)`); return; }
   const c = CARDS[id];
+  const from = stage.querySelector(`.mcard[data-idx="${i}"]`)?.getBoundingClientRect();
   sfx.card();
   me.shouts -= cost;
   me.hand.splice(i, 1);
@@ -328,13 +544,28 @@ function playCard(i) {
   }
   if (c.rhythm) { me.perm[c.rhythm] = (me.perm[c.rhythm] || 0) + 1; entry.rhythm = c.rhythm; }
   me.playLog.push(entry);
-  if (c.who) {
-    const p = byId[c.who];
-    view.setTeams(currentSquad(), m.opp.squad);
-    view.highlight = p.id;
-    setTimeout(() => { if (view.highlight === p.id) view.highlight = null; }, 1500);
-  }
-  render();
+  sel = -1;
+  me.onPitch = currentSquad();
+  if (c.who) { view.syncTeam('you', squadList(me.onPitch)); view.highlight = c.who; setTimeout(() => { if (view && view.highlight === c.who) view.highlight = null; }, 1800); }
+  renderPlan();
+  flyCard(id, from);
+}
+
+// The played card flies from the hand to its chip in the played row.
+function flyCard(id, from) {
+  const chip = stage.querySelector('#infoline .pchip:last-child');
+  if (!from || !chip) return;
+  const to = chip.getBoundingClientRect();
+  chip.style.visibility = 'hidden';
+  const c = CARDS[id];
+  const el = document.createElement('div');
+  el.className = 'flycard';
+  el.style.cssText = `left:${from.left}px;top:${from.top}px;width:${from.width}px;height:${from.height}px;--cc:${STYLES[c.style].color}`;
+  el.innerHTML = `<span>${c.icon || '👤'}</span>`;
+  document.body.appendChild(el);
+  const dx = to.left + to.width / 2 - (from.left + from.width / 2), dy = to.top + to.height / 2 - (from.top + from.height / 2);
+  el.animate([{ transform: 'none', opacity: 1 }, { transform: `translate(${dx}px,${dy}px) scale(.35)`, opacity: 0.6 }], { duration: 280, easing: 'cubic-bezier(.3,.7,.4,1)' })
+    .finished.then(() => { el.remove(); chip.style.visibility = ''; });
 }
 
 function undoCard(pi) {
@@ -346,7 +577,6 @@ function undoCard(pi) {
   sfx.deal();
   me.played.splice(pi, 1); me.playLog.splice(pi, 1);
   me.hand.push(id);
-  me.shouts += e.cost;
   me.sta = Math.max(0, Math.min(100, me.sta - e.sta));
   if (e.perm) {
     for (const k in c.fx || {}) me.perm[k] -= c.fx[k];
@@ -358,166 +588,313 @@ function undoCard(pi) {
   // costs may change (Don Tiki's free possession card): recompute shouts from scratch
   const spent = me.playLog.reduce((a, x) => a + x.cost, 0);
   me.shouts = 3 + (run.coach === 'thunder' && m.spell >= 4 ? 1 : 0) - spent;
-  view.setTeams(currentSquad(), m.opp.squad);
-  render();
+  sel = -1;
+  me.onPitch = currentSquad();
+  if (c.who) view.syncTeam('you', squadList(me.onPitch));
+  renderPlan();
 }
 
-// ================================================================ simulate a spell
+// ================================================================ live play
+function livePanel() {
+  setPanel(`${duelsHTML()}
+    <ol class="comm" id="comm">${commHTML()}</ol>
+    <div class="liverow"><span class="muted" id="livestate">Watching the spell…</span>
+      <div class="speed"><button class="btn small paper" data-sp="1">×1</button><button class="btn small paper" data-sp="2">×2</button><button class="btn small paper" data-sp="5">⏭</button></div></div>`, 'live');
+  stage.querySelectorAll('[data-sp]').forEach((b) => b.onclick = () => { view.speed = +b.dataset.sp; sfx.click(); markSpeed(); });
+  markSpeed();
+}
+function markSpeed() { stage.querySelectorAll('[data-sp]').forEach((b) => b.classList.toggle('pressed', +b.dataset.sp === view?.speed)); }
+function focusDuel(side, row) {
+  stage.querySelectorAll('.dcell').forEach((c) => c.classList.remove('focus'));
+  if (side) stage.querySelector(`.drow[data-row="${row}"] .dcell[data-side="${side}"]`)?.classList.add('focus');
+}
+
 async function kickOff() {
-  if (busy) return;
+  if (busy || !m) return;
   busy = true;
+  sel = -1;
+  const myView = view;
+  const alive = () => view === myView && m;
   sfx.whistle();
   const me = m.you, op = m.opp;
-  stage.querySelector('#kick').disabled = true;
-  stage.querySelector('#simctl').hidden = false;
-  fitPitch();
-  window.scrollTo({ top: stage.querySelector('.pitchwrap').getBoundingClientRect().top + scrollY - 64, behavior: 'smooth' });
+  m.you.onPitch = currentSquad();
   const Y = S.spellStats(m, 'you'), O = S.spellStats(m, 'opp');
+  // the spell's stats are fixed now, so card credit reads its conditions as of now
+  m.kickLead = { you: m.score[0] - m.score[1], opp: m.score[1] - m.score[0] };
+  m.kickCtrlLead = { you: Y.ctrl > O.ctrl, opp: O.ctrl > Y.ctrl };
+  livePanel();
+  updateDuels(S.projection(m));
+  const wrap = stage.querySelector('.pitchwrap');
+  const top = wrap.getBoundingClientRect().top;
+  if (top < 50 || top > innerHeight * 0.25) window.scrollTo({ top: Math.max(0, top + scrollY - 62), behavior: 'smooth' });
+  await ready;
+  await view.settled();
+  if (!alive()) return;
   const share = S.possShare(Y, O);
   const n = S.numPoss(Y, O);
   const startMin = m.spell * 15;
-  const playedNames = me.played.map((id) => CARDS[id].name);
-  shell.log(`You: ${playedNames.join(', ') || 'no changes'}. They: ${op.played.map((id) => CARDS[id].name).join(', ') || 'no changes'}.`, 'info', `${startMin}'`);
+  curMin = startMin;
+  say(`You: ${me.played.map((id) => CARDS[id].name).join(', ') || 'no changes'}. They: ${op.played.map((id) => CARDS[id].name).join(', ') || 'no changes'}.`, 'info');
   for (const c of op.played.map((id) => CARDS[id])) op.sta = clamp100(op.sta + (c.sta || 0));
-  let scoredThisSpell = false;
+  const ctx = { scored: false };
 
   // set pieces first
   for (const [side, St, Def] of [['you', Y, O], ['opp', O, Y]]) {
     for (const sp of St.h.setPiece) {
-      const min = startMin + 2;
-      await view.corner(side);
+      curMin = startMin + 2;
+      shell.setScore({ home: m.score[0], away: m.score[1], clock: `${curMin}'`, awayTeam: 'red' });
+      const card = CARDS[sp.card];
       const p = S.goalP(sp.p, Def);
-      const shooter = sp.who ? byId[sp.who] : S.pickShooter(m[side].squad);
-      const actor = await view.setShooter(sp.who && side === 'you' ? byId[sp.who] : shooter, side);
-      const res = S.rollShot(p);
-      shell.log(`${side === 'you' ? '' : TEAMS[op.clubId].name + ' '}corner — ${shooter.name} attacks it (${Math.round(p * 100)}%)…`, side === 'you' ? '' : 'them', `${min}'`);
-      await view.shot(actor, side, res, { header: true });
-      if (res === 'goal') { goal(side, shooter, min); if (side === 'you') scoredThisSpell = true; }
+      const squad = S.onPitch(m, side);
+      const shooterC = sp.who && squad.some((q) => q.id === sp.who) ? byId[sp.who] : S.pickShooter(squad);
+      focusDuel(side, 'score');
+      await view.corner(side, null, { ...lbl(card, side, 'corner', 'CORNER'), onHit: (i) => say(`${nm(i.by)} turns it behind. Corner to ${teamName(side)}${why(card)}.`, side === 'you' ? '' : 'them') });
+      if (!alive()) return;
+      const actor = await view.setShooter(shooterC, side, { header: true });
+      if (!alive()) return;
+      await playShot(actor, side, S.rollShot(p), p, { header: true, setPiece: sp.card, ctx });
+      if (!alive()) return;
     }
   }
 
   for (let i = 0; i < n; i++) {
-    const min = Math.round(startMin + ((i + 1) * 15) / (n + 1));
-    shell.setScore({ home: m.score[0], away: m.score[1], clock: `${min}'` });
+    curMin = Math.round(startMin + ((i + 1) * 15) / (n + 1));
+    shell.setScore({ home: m.score[0], away: m.score[1], clock: `${curMin}'`, awayTeam: 'red' });
     const owner = Math.random() < share ? 'you' : 'opp';
     const beats = S.genPossession(m, owner, Y, O);
-    for (const b of beats) {
-      const r = await animateBeat(b, min, Y, O);
-      if (r === 'goal-you') scoredThisSpell = true;
+    for (let bi = 0; bi < beats.length; bi++) {
+      const b = beats[bi];
+      // the player who breaks through is the one who then has the chance
+      const next = beats.slice(bi + 1).find((x) => (x.k === 'shot' || x.k === 'moment') && x.side === b.side);
+      b.runner = next ? next.shooter : null;
+      await animateBeat(b, owner, Y, O, ctx);
+      if (!alive()) return;
     }
   }
+  focusDuel(null);
 
-  // end of spell bookkeeping
-  stage.querySelector('#simctl').hidden = true;
+  // end of spell bookkeeping: the play pauses where it is
   view.speed = 1; markSpeed();
   me.sta = clamp100(me.sta - 8 + me.permHooks.staPerSpell);
   op.sta = clamp100(op.sta - 8);
-  if (scoredThisSpell && Y.h.onGoalShout) { me.bonusShout = Y.h.onGoalShout; shell.log('Rabona! The crowd gives you +1 Shout next spell.', 'good'); }
+  if (ctx.scored && Y.h.onGoalShout) { me.bonusShout = Y.h.onGoalShout; say('Rabona! The crowd gives you +1 Shout next spell.', 'good'); }
   me.discard.push(...me.played.filter((id) => !CARDS[id].perm), ...me.hand);
   me.hand = [];
   m.spell++;
-  busy = false;
-  fitPitch();
-  stage.querySelector('#kick').disabled = false;
-  if (m.spell === 3) { sfx.whistle(2); shell.banner('HALF-TIME', `${m.score[0]} – ${m.score[1]}`); }
+  curMin = m.spell * 15;
+  if (m.spell === 3) {
+    sfx.whistle(2);
+    shell.banner('HALF-TIME', `${m.score[0]} – ${m.score[1]}`);
+    say(`Half-time: ${m.score[0]}–${m.score[1]}.`, 'info');
+    ready = view.reset('opp');
+  }
   if (m.spell >= S.SPELLS) {
     if (m.score[0] === m.score[1] && m.spell === S.SPELLS) {
       sfx.whistle(2);
       shell.banner('EXTRA TIME', 'One more spell');
-      shell.log('Level after 90. One spell of extra time, then penalties.', 'info', "90'");
+      say('Level after 90. One spell of extra time, then penalties.', 'info');
+      ready = view.reset('you');
+      busy = false;
       beginSpell();
       return;
     }
+    busy = false;
     return fullTime();
   }
+  busy = false;
   beginSpell();
 }
 const clamp100 = (v) => Math.max(0, Math.min(100, v));
 
-function nameOf(side) { return side === 'you' ? 'Sunbirds' : TEAMS[m.opp.clubId].name; }
-
-async function animateBeat(b, min, Y, O) {
+async function animateBeat(b, owner, Y, O, ctx) {
   const side = b.side;
-  const t = `${min}'`;
-  const them = side === 'opp' ? 'them' : '';
+  const opp = side === 'you' ? 'opp' : 'you';
+  const kindOf = side === 'you' ? '' : 'them';
   switch (b.k) {
-    case 'build': await view.build(side); break;
-    case 'pass': break;
+    case 'build': {
+      focusDuel(side, 'keep');
+      const card = credit(side, 'ball');
+      const L = lbl(card, side, 'ball', null);
+      return view.build(side, { ...L, onHit: (i) => {
+        const t = { longball: `${nm(i.from)}'s long ball is won by ${nm(i.by)}`, intercept: `${nm(i.by)} cuts out ${nm(i.from)}'s pass`,
+          rollout: `${nm(i.from)} rolls it out to ${nm(i.by)}`, collect: `${nm(i.by)} picks up the loose ball`, kickoff: `${nm(i.from)} kicks off to ${nm(i.by)}` }[i.kind];
+        if (t) say(t + (card && i.kind !== 'kickoff' && i.kind !== 'rollout' ? why(card) : '') + '.', kindOf);
+      } });
+    }
+    case 'pass': {
+      const card = credit(side, 'keep');
+      if (!card) return;
+      focusDuel(side, 'keep');
+      return view.keep(side, { ...lbl(card, side, 'keep', null), onHit: (i) => say(`${nm(i.from)} plays through the press to ${nm(i.by)}${why(card)}.`, kindOf) });
+    }
     case 'press': {
-      const victim = view.carrier?.c;
-      await view.press(side);
-      const presser = view.carrier?.c;
-      shell.log(`${presser?.name || nameOf(side)} presses ${victim?.name || ''} and wins it high! (press ${Math.round(b.p * 100)}%)`, side === 'you' ? 'good' : 'bad', t);
-      break;
+      focusDuel(opp, 'keep');
+      const card = credit(side, 'press');
+      return view.press(side, { ...lbl(card, side, 'press', side === 'you' ? 'WON IT!' : 'THEY WIN IT'), onHit: (i) => say(`${nm(i.by)} wins it off ${nm(i.from)} high up (press ${Math.round(b.p * 100)}%)${why(card)}.`, good(side)) });
     }
-    case 'skill': await view.skill(); shell.log(`${view.carrier?.c.name} skips past the defence — skill move!`, side === 'you' ? 'good' : 'them', t); break;
-    case 'lost': await view.blocked(side === 'you' ? 'opp' : 'you'); shell.log(`${nameOf(side)} try one trick too many and lose it.`, side === 'you' ? 'bad' : 'good', t); break;
-    case 'progress': await view.progress(side); shell.log(`${nameOf(side)} break into the final third.`, them, t); break;
+    case 'skill': {
+      focusDuel(side, 'break');
+      const card = credit(side, 'skill');
+      return view.skill(side, { ...lbl(card, side, 'skill', '✨ SKILL!'), onHit: (i) => say(`${nm(i.by)} skips past ${nm(i.from)}${why(card)}.`, side === 'you' ? 'good' : 'them') });
+    }
+    case 'lost': {
+      focusDuel(side, 'break');
+      const card = credit(side, 'lost');
+      return view.tackle(view.presser(opp), { tag: 'lost', label: card ? `${cardTag(card)} backfires` : 'LOST IT', color: '#FF8A80',
+        onHit: (i) => say(`${nm(i.from)} tries one trick too many; ${nm(i.by)} takes it${why(card)}.`, side === 'you' ? 'bad' : 'good') });
+    }
+    case 'progress': {
+      focusDuel(side, 'break');
+      const card = credit(side, 'progress');
+      return view.progress(side, { runner: b.runner, ...lbl(card, side, 'progress', null), onHit: (i) => say(`${i.by === i.from ? `${nm(i.by)} drives` : `${nm(i.from)} finds ${nm(i.by)}`} into the final third (${Math.round((side === 'you' ? S.progressP(Y, O) : S.progressP(O, Y)) * 100)}%)${why(card)}.`, kindOf) });
+    }
     case 'blocked': {
-      const att = view.carrier?.c;
-      await view.blocked(side);
-      shell.log(`${view.carrier?.c.name} cuts out ${att?.name || 'the attack'}.`, side === 'you' ? 'good' : 'them', t);
-      break;
+      focusDuel(opp, 'break');
+      const card = credit(side, 'block');
+      return view.blocked(side, { ...lbl(card, side, 'block', 'BLOCKED!'), onHit: (i) => say(`${nm(i.by)} ${i.kind === 'intercept' ? `cuts out ${nm(i.from)}'s pass` : `tackles ${nm(i.from)}`}${why(card)}.`, good(side)) });
     }
-    case 'counter': await view.counter(side); shell.log(`Counter-attack by ${nameOf(side)}! (${Math.round(b.p * 100)}% to break)`, side === 'you' ? 'good' : 'bad', t); break;
-    case 'foul': sfx.whistle(); view.label('🟨 FOUL', view.ball.x, view.ball.y - 30, '#FFD23F'); shell.log(`Tactical foul by ${nameOf(side)} stops a big chance. Booking.`, 'info', t); await view.wait(0.6); break;
-    case 'chance': break;
+    case 'counter': {
+      focusDuel(side, 'score');
+      const card = credit(side, 'counter');
+      return view.counter(side, { runner: b.runner, ...lbl(card, side, 'counter', 'COUNTER!'), onHit: (i) => {
+        const runner = i.to && i.to !== i.by ? ` sends ${nm(i.to)} away` : ' breaks forward';
+        say(`Counter! ${nm(i.by)}${runner} (${Math.round(b.p * 100)}% to break)${why(card)}.`, good(side));
+      } });
+    }
+    case 'foul': {
+      const card = credit(side, 'foul');
+      return view.foul(side, { label: card ? `🟨 ${card.name}` : '🟨 FOUL', onHit: (i) => say(`${nm(i.by)} hauls down ${nm(i.from)}: big chance stopped, booking${why(card)}.`, 'info') });
+    }
+    case 'chance': return;
     case 'shot': {
-      const actor = await view.setShooter(b.shooter, side);
-      shell.log(`${b.shooter.name} shoots${b.kind === 'counter' ? ' on the break' : b.kind === 'turnover' ? ' after the turnover' : ''} (${Math.round(b.p * 100)}%)…`, them, t);
-      await view.shot(actor, side, b.result, { header: b.kind === 'header' });
-      if (b.result === 'goal') { goal(side, b.shooter, min); return side === 'you' ? 'goal-you' : 'goal-opp'; }
-      shell.log(b.result === 'save' ? 'Saved.' : 'Off target.', '', '');
-      break;
+      focusDuel(side, 'score');
+      const actor = await view.setShooter(b.shooter, side, { header: b.kind === 'header' });
+      if (!view) return;
+      return playShot(actor, side, b.result, b.p, { header: b.kind === 'header', kind: b.kind, ctx });
     }
     case 'moment': {
-      const actor = await view.setShooter(b.shooter, side);
-      const opts = S.momentOptions(m, b, Y, O);
-      const choice = await keyMoment(b, opts);
-      const res = S.resolveMoment(m, b, choice, Y, O);
-      shell.log(`${side === 'you' ? 'You' : 'Wak'} chose "${choice.label}" (${Math.round(choice.p * 100)}%). ${res.text || ''}`, side === 'you' ? '' : 'them', t);
-      if (res.result === 'cut') { await view.blocked('opp'); return; }
-      let shooterActor = actor;
-      if (res.shooter && res.shooter.id !== b.shooter.id) {
-        const mate = view.find(res.shooter, side);
-        if (mate) { const [x, y] = view.pitch.toPx(0.5, side === 'you' ? 0.1 : 0.9); await Promise.all([view.runTo(mate, x, y, 0.4)]); await view.pass(actor, mate, 0.3); shooterActor = mate; }
-      }
-      if (res.round) await view.skill();
-      await view.shot(shooterActor, side, res.result);
-      view.release(shooterActor, actor);
-      if (res.result === 'goal') { goal(side, res.shooter, min); return side === 'you' ? 'goal-you' : 'goal-opp'; }
-      break;
+      focusDuel(side, 'score');
+      return keyMomentBeat(b, Y, O, ctx);
     }
   }
 }
 
-function goal(side, scorer, min) {
+// One shot with its contact-frame commentary. `p` is the chance the player saw.
+function playShot(actor, side, result, p, o = {}) {
+  const pct = Math.round(p * 100);
+  const def = side === 'you' ? 'opp' : 'you';
+  const fin = credit(side, 'goal', { setPiece: o.setPiece, moment: o.moment, header: o.header, kind: o.kind });
+  const stop = credit(def, result === 'miss' ? 'miss' : 'save');
+  let L;
+  if (result === 'goal') L = fin ? { label: side === 'you' ? `GOAL! ${cardTag(fin)}` : `${cardTag(fin)} → they score`, color: side === 'you' ? '#FFD23F' : '#FF8A80' } : { label: null };
+  else if (result === 'save') L = lbl(stop, def, 'save', 'SAVED!');
+  else L = stop ? lbl(stop, def, 'miss', undefined) : { label: undefined };
+  if (o.label !== undefined) L = { ...L, label: o.label };
+  return view.shot(actor, side, result, { header: o.header, dive: o.dive, ...L, onHit: (i) => {
+    const how = o.kind === 'counter' ? ' on the break' : o.kind === 'turnover' ? ' after the steal' : o.kind === 'freekick' ? ' from the free kick' : o.kind === 'penalty' ? ' from the spot' : o.header ? ' with a header' : '';
+    const note = o.note ? ` ${o.note}.` : '';
+    if (i.result === 'goal') { goal(side, actor.c, fin); if (side === 'you' && o.ctx) o.ctx.scored = true; say(`GOAL! ${nm(actor)} scores${how} (${pct}% chance)${why(fin)}. ${m.score[0]}–${m.score[1]}.${note}`, 'goal'); }
+    else if (i.kind === 'save') say(`${nm(i.by)} saves from ${nm(actor)}${how} (${pct}% chance)${why(stop)}.${note}`, side === 'you' ? 'bad' : 'good');
+    else say(`${nm(actor)}${how ? ' shoots' + how + ' and' : ''} hits ${i.kind === 'post' ? 'the post' : 'it wide'} (${pct}% chance)${why(stop)}.`, side === 'you' ? 'bad' : 'good');
+  } });
+}
+
+function goal(side, scorer, card) {
   if (side === 'you') m.score[0]++; else m.score[1]++;
-  shell.setScore({ home: m.score[0], away: m.score[1], clock: `${min}'` });
-  shell.log(`GOAL! ${scorer.name} — ${m.score[0]}–${m.score[1]}`, 'goal', `${min}'`);
-  if (side === 'you') { shell.banner('GOAL!', `${scorer.name} ${min}'`); shell.confetti(); }
-  else shell.banner('GOAL', `${scorer.name} · ${nameOf('opp')}`, '#ff8a80');
+  shell.setScore({ home: m.score[0], away: m.score[1], clock: `${curMin}'`, awayTeam: 'red' });
+  if (side === 'you') { shell.banner('GOAL!', `${scorer.name} ${curMin}'${card ? ' · ' + card.name : ''}`); shell.confetti(); }
+  else shell.banner('GOAL', `${scorer.name} · ${teamName('opp')}`, '#ff8a80');
   shell.shake(stage.querySelector('.pitchwrap'));
 }
 
-function keyMoment(b, opts) {
+async function keyMomentBeat(b, Y, O, ctx) {
+  const side = b.side;
+  const actor = await view.setShooter(b.shooter, side);
+  if (!view) return;
+  const opts = S.momentOptions(m, b, Y, O);
+  // make the options visible on the pitch: the square option's teammate makes a run
+  let mateActor = null;
+  let sceneReady = Promise.resolve();
+  if (side === 'you') {
+    const sq = opts.find((o) => o.id === 'square');
+    mateActor = (sq && view.find(sq.mate, 'you')) || view.pick('you', 'FW', { exclude: [actor, ...view.team('you').filter((a) => a.c.pos === 'GK')] });
+    if (sq && mateActor) { sq.label = `Square to ${mateActor.c.name}`; sq.mate = mateActor.c; }
+    if (mateActor && mateActor !== actor) {
+      const [u] = view.sv('you', actor.x, actor.y);
+      const T = view.P('you', u < 0.5 ? Math.min(0.85, u + 0.3) : Math.max(0.15, u - 0.3), 0.22);
+      sceneReady = view.runTo(mateActor, T[0], T[1], { dur: 0.7 });
+    }
+  }
+  const choice = await keyMoment(b, opts, sceneReady);
+  if (!view) return;
+  livePanel();
+  updateDuels(S.projection(m));
+  focusDuel(side, 'score');
+  const res = S.resolveMoment(m, b, choice, Y, O);
+  const pct = choice.p;
+  say(side === 'you' ? `You go for: ${choice.label} (${Math.round(pct * 100)}% goal).` : `${choice.label} (${Math.round(pct * 100)}% save).`, 'info');
+  if (side === 'you') {
+    if (res.result === 'cut') {
+      const mid = [(actor.x + mateActor.x) / 2, (actor.y + mateActor.y) / 2];
+      const def = view.pick('opp', null, { near: mid, exclude: view.team('opp').filter((a) => a.c.pos === 'GK') });
+      return view.intercept(def, actor, mateActor, { onHit: (i) => say(`${nm(i.by)} cuts out the square ball to ${nm(i.to)}.`, 'bad') });
+    }
+    if (choice.id === 'square') return playShot(mateActor, 'you', res.result, pct, { ctx, moment: 'square' });
+    if (choice.id === 'round') {
+      return view.roundKeeper(actor, 'you', res.result, { onHit: (i) => {
+        if (i.result === 'goal') { const rc = credit('you', 'goal', { moment: 'round' }); goal('you', actor.c, rc); ctx.scored = true; say(`GOAL! ${nm(actor)} rounds the keeper (${Math.round(pct * 100)}%)${why(rc)}. ${m.score[0]}–${m.score[1]}.`, 'goal'); }
+        else if (i.kind === 'save') say(`${nm(i.by)} smothers it at ${nm(actor)}'s feet.`, 'bad');
+        else say(`${nm(actor)} rounds the keeper but the angle beats him.`, 'bad');
+      } });
+    }
+    return playShot(actor, 'you', res.result, pct, { ctx, moment: 'shoot' });
+  }
+  // defending: Wak's choice
+  if (choice.id === 'rush') {
+    await view.rushOut('opp');
+    if (res.penalty) {
+      const taker = await view.penalty('opp', b.shooter, { onHit: (i) => say(`Wak brings down ${nm(i.from)}. Penalty!`, 'bad') });
+      return playShot(taker, 'opp', res.result, S.PEN_GOAL, { kind: 'penalty', ctx });
+    }
+  }
+  // The dive comes from the result: a wrong guess commits the wrong way; otherwise a
+  // beaten Wak goes the right way and ends short.
+  let dive, label, note;
+  if (res.guess) {
+    dive = res.guess === 'wrong' ? 'wrong' : 'short';
+    note = res.guess === 'right' ? 'Wak guessed right' : 'Wak went the wrong way';
+    label = res.result === 'save' ? (res.guess === 'right' ? 'GUESSED RIGHT!' : 'WRONG WAY… LEG SAVE!') : (res.guess === 'right' ? 'RIGHT WAY, BEATEN' : 'WRONG WAY!');
+    if (res.guess === 'wrong' && res.result === 'save') note = 'Wak went the wrong way but his trailing leg kept it out';
+  } else if (res.result === 'goal') dive = 'short';
+  return playShot(actor, 'opp', res.result, 1 - pct, { ctx, dive, label, note, moment: 'shoot' });
+}
+
+function keyMoment(b, opts, ready = Promise.resolve()) {
   return new Promise((resolve) => {
-    const wrap = stage.querySelector('.pitchwrap');
-    const el = document.createElement('div');
-    el.className = 'moment' + (b.side === 'opp' ? ' def' : '');
     const youAtk = b.side === 'you';
-    el.innerHTML = `<div class="panel">
-      <div class="row"><span class="pframe"><img src="${portrait(youAtk ? b.shooter : byId.wak, 56)}" width="56" height="56" alt=""></span>
-      <div><h3>${youAtk ? 'BIG CHANCE!' : 'DANGER!'}</h3><div style="font-size:13px">${youAtk ? `${b.shooter.name} is clean through.` : `${b.shooter.name} is through on Wak.`} What now?</div></div></div>
-      ${opts.map((o, i) => `<button class="btn ${youAtk ? '' : 'paper'} opt" data-i="${i}"><span>${o.label}<small>${o.detail}</small></span>${oddsPill(o.p, youAtk ? 'goal' : 'save')}<span class="key">${i + 1}</span></button>`).join('')}
-    </div>`;
+    const p = setPanel(`<div class="moment ${youAtk ? '' : 'def'}">
+      <div class="row"><span class="pframe"><img src="${portrait(youAtk ? b.shooter : byId.wak, 44)}" width="44" height="44" alt=""></span>
+      <div><h3>${youAtk ? 'BIG CHANCE!' : 'DANGER!'}</h3><div class="msub">${youAtk ? `${b.shooter.name} is clean through.` : `${b.shooter.name} is through on Wak.`} What now?</div></div></div>
+      ${opts.map((o, i) => `<button class="btn ${youAtk ? '' : 'paper'} opt" data-i="${i}"><span>${o.label}<small>${o.detail}</small></span>${oddsPill(o.p, youAtk ? 'goal' : 'save')}</button>`).join('')}
+    </div>`, 'mom');
     sfx.cutin();
-    view.speed = Math.min(view.speed, 2);
-    const done = (i) => { document.removeEventListener('keydown', onKey); el.remove(); sfx.click(); resolve(opts[i]); };
+    view.speed = Math.min(view.speed, 2); markSpeed();
+    let answered = false;
+    // a tap is taken at once (press state, sound) but plays out only when the scene is
+    // ready, e.g. after the teammate's run into the box has finished
+    const done = (i) => {
+      document.removeEventListener('keydown', onKey);
+      if (!p.isConnected || answered) return;
+      answered = true; sfx.click();
+      p.querySelectorAll('.opt').forEach((x, j) => { x.disabled = true; x.classList.toggle('pressed', j === i); });
+      ready.then(() => { if (p.isConnected) resolve(opts[i]); });
+    };
     const onKey = (e) => { const k = +e.key; if (k >= 1 && k <= opts.length) done(k - 1); };
     document.addEventListener('keydown', onKey);
-    el.querySelectorAll('.opt').forEach((btn) => btn.onclick = () => done(+btn.dataset.i));
-    wrap.appendChild(el);
+    p.querySelectorAll('.opt').forEach((btn) => btn.onclick = () => { p.querySelectorAll('.opt').forEach((x) => { x.disabled = true; }); done(+btn.dataset.i); });
+    // only scroll if an option is off screen; keep the shooter and the goal in view
+    const last = [...p.querySelectorAll('.opt')].pop().getBoundingClientRect();
+    if (last.bottom > innerHeight) window.scrollBy({ top: last.bottom - innerHeight + 8, behavior: 'smooth' });
   });
 }
 
@@ -526,7 +903,6 @@ async function fullTime() {
   let [a, b] = m.score;
   let pens = '';
   if (a === b) {
-    // quick shootout, 5 kicks each at 75%
     let pa = 0, pb = 0;
     for (let i = 0; i < 5 || pa === pb; i++) { if (Math.random() < 0.75) pa++; if (Math.random() < 0.75) pb++; if (i > 12) break; }
     pens = ` (pens ${pa}–${pb})`;
@@ -534,29 +910,38 @@ async function fullTime() {
     a += pa > pb ? 0.1 : 0; b += pb > pa ? 0.1 : 0;
   }
   const won = a > b;
+  const myM = m;
   sfx.whistle(3);
+  shell.setScore({ home: m.score[0], away: m.score[1], clock: 'FT', awayTeam: 'red' });
+  setPanel(`<div class="ftpanel"><h3>FULL TIME</h3><p>${m.score[0]}–${m.score[1]}${pens}</p></div>`, 'ft');
   await shell.wait(600);
+  if (m !== myM) return;
   const opp = m.oppInfo;
   const L = m.league;
   if (won) {
     sfx.win(); shell.confetti(200);
-    if (opp.isBoss) return leagueWon(pens);
+    if (opp.isBoss) { killView(); return leagueWon(pens); }
     shell.banner('FULL TIME', `You win ${m.score[0]}–${m.score[1]}${pens}`);
-    await shell.wait(1200);
+    await shell.wait(1400);
+    if (m !== myM) return;
     run.round++;
+    killView();
     rewardScreen(`Beat ${TEAMS[opp.clubId].name} ${m.score[0]}–${m.score[1]}${pens}`);
   } else {
     sfx.lose();
     shell.banner('FULL TIME', `Lost ${m.score[0]}–${m.score[1]}${pens}`, '#ff8a80');
-    await shell.wait(1000);
+    await shell.wait(1200);
+    if (m !== myM) return;
     const choice = await shell.modal({ title: 'Knocked out', dismiss: false,
       html: `<p>${TEAMS[opp.clubId].name} beat you ${m.score[0]}–${m.score[1]}${pens} in ${L.name}.</p><p class="muted">Prototype: you can replay the match with the same deck instead of starting over.</p>`,
       buttons: [{ label: 'Replay match', value: 'replay' }, { label: 'New run', cls: 'paper', value: 'home' }] });
-    if (choice === 'replay') startMatch({}); else homeScreen();
+    if (m !== myM) return;
+    if (choice === 'replay') startMatch({}); else { killView(); homeScreen(); }
   }
 }
 
 async function leagueWon(pens) {
+  window.scrollTo(0, 0);
   const L = m.league;
   const boss = COACHES[L.boss];
   const newCoach = !progress.coaches.includes(boss.id) && boss.id !== 'cupboss';
@@ -566,17 +951,18 @@ async function leagueWon(pens) {
   shell.setScore(null);
   stage.innerHTML = `<div class="screen center">
     <div class="trophy">🏆</div>
-    <div class="logo" style="font-size:34px">${L.name} CHAMPIONS</div>
+    <div class="logo" style="font-size:32px">${L.name} CHAMPIONS</div>
     <p>You beat ${boss.name}'s ${TEAMS[m.opp.clubId].name} ${m.score[0]}–${m.score[1]}${pens}.</p>
-    ${newCoach ? `<div class="panel row" style="text-align:left"><img src="${portrait(boss.char, 72)}" style="border-radius:10px;border:3px solid var(--ink)" alt="">
+    ${newCoach ? `<div class="panel row" style="text-align:left"><img src="${portrait(boss.char, 64)}" width="64" height="64" style="border-radius:10px;border:3px solid var(--ink);flex:none" alt="">
       <div><b style="font-family:var(--font-h);font-size:18px">Coach unlocked: ${boss.name}</b><br><i>${boss.quote || ''}</i><br>${boss.passive}</div></div>` : ''}
-    ${progress.beaten.length === 5 && !progress.beaten.includes('cup') ? '<div class="panel">🏆 All five leagues conquered — the <b>Champions Cup</b> is open!</div>' : ''}
+    ${progress.beaten.length === 5 && !progress.beaten.includes('cup') ? '<div class="panel">🏆 All five leagues conquered: the <b>Champions Cup</b> is open!</div>' : ''}
     <button class="btn big" id="home">Back to leagues</button></div>`;
   shell.confetti(240);
   stage.querySelector('#home').onclick = () => { sfx.click(); homeScreen(); };
 }
 
 function rewardScreen(headline) {
+  window.scrollTo(0, 0);
   shell.setScore(null);
   const L = leagueOf(run.league);
   const styles = L.id === 'cup' ? L.styles : [L.style];
@@ -611,9 +997,10 @@ function rewardScreen(headline) {
 
 // ================================================================ keyboard
 document.addEventListener('keydown', (e) => {
-  if (!m || !stage.querySelector('#hand') || document.querySelector('.sheet-wrap') || stage.querySelector('.moment')) return;
-  if (e.key >= '1' && e.key <= '9' && !e.altKey) playCard(+e.key - 1);
+  if (!m || busy || !stage.querySelector('#hand') || document.querySelector('.sheet-wrap')) return;
+  if (e.key >= '1' && e.key <= '9' && !e.altKey) tapCard(+e.key - 1);
   if (e.key === 'Enter') { e.preventDefault(); kickOff(); }
+  if (e.key === 'Escape' && sel >= 0) { sel = -1; renderPlan(); }
   if (e.key === 'd') showDeck();
   if (e.key === 'z' || e.key === 'u') { if (m.you.played.length) undoCard(m.you.played.length - 1); }
 });

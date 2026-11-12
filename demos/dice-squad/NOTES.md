@@ -6,3 +6,21 @@ Rivals tamper: Spider Lu steals your highest die in the Attack zone; Iron Hans l
 **Core decision each turn:** which die goes where — spend the 6 on Vision now, or Engine a 5 into a 6 for a shot; Recycle the 1s or keep them for Short Pass; save a die for Wak or throw everything at the tackle.
 **Where the fun is:** combo turns (Engine 5→6 → Nick It; break a line and finish in the Box with leftovers) feel great, and the shot/save odds make the gamble readable.
 **Where it isn't:** it is honestly closer to "a puzzle wearing a kit" — the football reads mostly through the zone track and sprites, not through the decisions. Walls have no personality beyond HP and tamper, defence turns are short and samey, and the outcome per match is still dominated by a couple of shot rolls. Balance is untested beyond a few play-throughs.
+
+## Polish pass
+**Rule:** every slotted die plays out on the pitch, and its number lands on the frame the motion ends.
+- Wall damage (`place` → `playBall`): passers (Long Kick, Short Pass, Vision, Lay-off) get the ball and play it forward; carriers (Dribble, Drive) run it at the nearest wall defender, who flinches. Wall HP, label, zone popup and log fire on arrival. Before, all of it fired at once while the pass was still starting.
+- `passTo` now follows the receiver's live position, so the pass after a line break no longer snaps to a moving forward.
+- Tackles (`view.tackle`): the tackler runs to the attacker, contact frame (hitstop, label, attack drops), then either the attacker stumbles and keeps it, or the ball pops to the tackler (won ball, no `give` jump).
+- Turnover: the nearest wall defender tackles your carrier and passes to their attacker (logic now names who won it).
+- Shots (`view.shotAt`): the keeper's hands and the ball reach the save point on the same frame. Saves end with the ball in the keeper's hands, goals in the net. Shot numbers and the result log only after the ball arrives. Labels show the odds you saw ("SAVED · 50%").
+- Restarts after goals and goal kicks after a wide shot use a fade cut (`view.cut`); everything else is continuous. No `give()` outside a cut.
+- Penalties: every kick is shown (ours at their goal, theirs at Wak), with a running pen score.
+- Spider Lu / Iron Hans: dice land first, then the rival reaches and the die is webbed/locked on the same frame as the pitch label.
+- Dice roll no longer re-creates elements every tick (the tumble restarted and the dice flickered).
+- Layout: zone track and threat panel share a fixed 58 px height, info line is fixed at 34 px, socket labels reserve 3 lines and wrap, End/Defend button has a fixed width, the dice tray stays one row (dice shrink when Split adds more), and the tray ignores taps while a beat plays.
+- Keeper dive: the kit's dive pose lies toward -facing, so keepers face away from the ball; a saved ball sits in the hands (`a.hold`) and drops to the feet when he gets up.
+- `?jank=1` exposes `window.__slow` (time scale) and `window.__ds` (view + state) for testing.
+- Review fixes: their shooter stops at v 0.68, clear of Wak. On a goal the ball path is computed first, and the keeper either dives short of it by more than a ball's width (checked frame by frame in `pathClear`) or guesses the wrong way. Keepers and the rivals get up through the `ready` crouch. Lu and Hans run at your carrier before the steal or lock. The badge moves to the corner away from the play. With the Fifth Die the tray reserves a second row, so dice stay 42 px. The roll is logged before the steal.
+- Balance (greedy bot, 3000 sims per match; before → after): goals for 2.0 → 1.6, goals against 0.3 → 1.0, Friendly wins 93% → 56%, Final 77% → 42% (21% losses). Changes: the keeper's 6 always saves (shots max 83%); one line per turn; Lu/Hans also strike on entry; their attack 12/14/11 with shot 3/2/3; Nick It takes 7 (no instant win); Save is die +2. Ball won back on 45–54% of defend turns (was 65–72%).
+- Last round: keepers are left out of `celebrate()` and get up via `getUp()`, so no pop on goals. The one-line rule shows before commit ("−5→1" on the socket, "holds at 1" in the info line). Save bonus left at +2: +3/+4 make Save useful but drop goals against to 0.4–0.65 a match.

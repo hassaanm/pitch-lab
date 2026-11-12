@@ -4,8 +4,8 @@ import { sfx } from '../../shared/sfx.js';
 import { byId, crestSVG } from '../../shared/cast.js';
 import { drawPlayer, drawBall, setupCanvas, portrait, lerp, ease } from '../../shared/art.js';
 import {
-  COLS, COL_SHORT, cellName, TELL_TRUTH, onTarget, saveIfRightCol, Oskar, KICKERS,
-  kickerPrior, kickerPosterior, stopOdds, sampleKick,
+  COLS, COL_SHORT, cellName, TELL_TRUTH, onTarget, Oskar, KICKERS,
+  kickerPrior, kickerPosterior, stopOdds, sampleKick, resolveKick,
 } from './brain.js';
 
 const OURS = ['rio', 'kenji', 'bruno', 'pip', 'sol', 'lupe', 'ada', 'tomo', 'mo', 'wak'];
@@ -21,11 +21,12 @@ const shell = new Shell({
   title: 'Shootout Minds',
   pitch: 'Penalties as mind games. Big Oskar learns where you shoot; Redrock kickers have habits and tells.',
   how: [
-    '<b>Shooting:</b> pick one of 6 spots (3 columns × top/low) and <b>Placed</b> or <b>Power</b>. Power is harder to save but can sail over.',
-    'Big Oskar keeps a notebook of your kicks and dives where you usually go. Peek at it with <b>📓</b> (N) or the <b>🔥</b> heat-map (V).',
-    '<b>In goal (Wak):</b> pick a spot to cover. The kicker shows a tell (eyes / run-up) that is true ~65% of the time.',
-    'Each % already counts what you can see: Oskar\'s notes, the kicker\'s habit, and the tell.',
-    'Five kicks each, then sudden death.',
+    '<b>Shooting:</b> tap one of 6 spots (3 columns × top/low), pick <b>Placed</b> or <b>Power</b>, then <b>Shoot!</b> Power is harder to save but can go over or wide.',
+    'Big Oskar keeps a notebook of your kicks and dives where you usually go. He stays in the middle more than you might think. Peek at his notes with <b>📓</b> (N) or the <b>🔥</b> heat-map (V).',
+    'Low down the middle can still hit the trailing legs of a keeper who dives to a side.',
+    '<b>In goal (Wak):</b> nothing is picked for you. Read the tell (eyes / run-up, true ~65% of the time), tap a spot to cover, then <b>Dive!</b>',
+    'Each % already counts what you can see: Oskar\'s notes, the kicker\'s habit, and the tell. After each kick the panel shows the % you had.',
+    'Five kicks each, then sudden death. In sudden death the tally shows the latest five rounds, and the keepers take a kick too.',
     'Keys: arrows pick the spot, 1 Placed / 2 Power, Enter or Space to commit.',
   ],
   notice: 'Does a learning opponent turn a coin flip into reading? Watch whether you start shooting against your own habits.',
@@ -63,8 +64,14 @@ let T = 0, lastNow = 0, freezeUntil = 0;
 let crowd = [];
 let ripple = { a: 0, x: 0, y: 0 };
 let excite = 0;
-const actors = { keeper: null, kicker: null };
-const ball = { x: 0, y: 0, r: 9, h: 0, spin: 0, vis: true };
+const actors = { keeper: null, kicker: null }; // the two players taking part in the current kick
+let cast = []; // everyone on screen, including players walking off
+const ball = { x: 0, y: 0, r: 9, h: 0, spin: 0, vis: false, alpha: 1, held: null, behind: null };
+// Dev aid: ?jank=1 exposes window.__slow (e.g. 0.25) to watch contacts in slow motion.
+const DEV = new URLSearchParams(location.search).has('jank');
+// Dev aid (?jank=1 only): window.__force = { out: {res, how}, dive?: {col,row}, kick?: {col,row,type} } scripts the next kick.
+if (DEV) window.__state = () => ({ cast: cast.map((a) => ({ id: a.char.id, role: a.role, x: Math.round(a.x), y: Math.round(a.y), pose: a.pose, alpha: a.alpha })), ball: { ...ball, held: ball.held?.char.id }, tweens: tweens.length });
+const takeForce = () => { if (!DEV || !window.__force) return null; const f = window.__force; window.__force = null; return f; };
 
 function layout() {
   W = Math.round(Math.min(Math.max(root.clientWidth, 300), 620));
@@ -109,10 +116,10 @@ const VAR = {
   night: { sky: ['#0b1024', '#141A2E'], g1: '#3E9A45', g2: '#378C3E', tint: 'rgba(10,20,60,.22)', lights: true },
 };
 
-function frame(now) {
-  requestAnimationFrame(frame);
+function frame(now, fromTimer) {
+  if (!fromTimer) requestAnimationFrame(frame);
   if (!ctx || !S) return;
-  let dt = Math.min(0.05, (now - lastNow) / 1000); lastNow = now;
+  let dt = Math.min(0.05, (now - lastNow) / 1000) * (DEV ? (window.__slow ?? 1) : 1); lastNow = now;
   if (now < freezeUntil) dt = 0;
   T += dt; stepTweens(dt);
   ripple.a *= Math.pow(0.03, dt); excite *= Math.pow(0.35, dt);
@@ -143,14 +150,29 @@ function frame(now) {
   ctx.beginPath(); ctx.moveTo(G.x0 - W * 0.08, G.y1); ctx.lineTo(G.x0 - W * 0.14, H * 0.72); ctx.lineTo(G.x1 + W * 0.14, H * 0.72); ctx.lineTo(G.x1 + W * 0.08, G.y1); ctx.stroke();
   ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.ellipse(G.spot.x, G.spot.y + 6, 6, 2.5, 0, 0, 6.29); ctx.fill();
   drawNet();
-  // keeper, then ball (if behind keeper), kicker
-  const k = actors.keeper, kk = actors.kicker;
-  const ballBehind = ball.y < G.y1 + 2 && ball.r < 6.5;
-  if (ball.vis && ballBehind) drawBall(ctx, ball.x, ball.y, ball.r, ball.spin, ball.h);
-  if (k) drawPlayer(ctx, k.char, k.x, k.y, { size: k.size, pose: k.pose, t: T, facing: k.facing, look: k.look });
+  // keepers, then ball (if behind them), posts, ball, kickers
+  if (ball.held) { const p = holdPt(ball.held); ball.x = p.x; ball.y = p.y; ball.h = 0; ball.alpha = ball.held.alpha ?? 1; }
+  const ballBehind = ball.behind ?? (ball.y < G.y1 + 2 && ball.r < 6.5);
+  const drawB = () => {
+    if (!ball.vis || ball.alpha <= 0.02) return;
+    ctx.save(); ctx.globalAlpha = ball.alpha;
+    if (ball.halo) { // a dark ring so a ball over the bar reads against the crowd
+      ctx.fillStyle = 'rgba(27,27,47,.85)'; ctx.beginPath(); ctx.arc(ball.x, ball.y - ball.h, ball.r + 2.5, 0, 6.29); ctx.fill();
+    }
+    drawBall(ctx, ball.x, ball.y, ball.r, ball.spin, ball.h); ctx.restore();
+  };
+  const drawA = (a) => {
+    if ((a.alpha ?? 1) <= 0.02) return;
+    // tilt: an extra rotation about the feet, used to swing into and out of the dive pose
+    if (a.tilt) { ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.tilt); ctx.translate(-a.x, -a.y); }
+    drawPlayer(ctx, a.char, a.x, a.y, { size: a.size, pose: a.pose, t: T, facing: a.facing, look: a.look, speed: a.speed || 1, alpha: a.alpha ?? 1 });
+    if (a.tilt) ctx.restore();
+  };
+  if (ballBehind) drawB();
+  cast.filter((a) => a.role === 'keeper').forEach(drawA);
   drawPosts();
-  if (ball.vis && !ballBehind) drawBall(ctx, ball.x, ball.y, ball.r, ball.spin, ball.h);
-  if (kk) drawPlayer(ctx, kk.char, kk.x, kk.y, { size: kk.size, pose: kk.pose, t: T, facing: kk.facing, look: kk.look, speed: kk.speed || 1 });
+  if (!ballBehind) drawB();
+  cast.filter((a) => a.role === 'kicker').forEach(drawA);
   if (V.tint) { ctx.fillStyle = V.tint; ctx.fillRect(0, 0, W, H); }
   if (V.lights) {
     for (const lx of [10, W - 10]) {
@@ -164,6 +186,9 @@ function frame(now) {
   }
 }
 requestAnimationFrame(frame);
+// Dev aid (?jank=1 only): a hidden test browser pauses requestAnimationFrame, so
+// keep the same frame loop ticking from a timer when rAF has gone quiet.
+if (DEV) setInterval(() => { const n = performance.now(); if (n - lastNow > 40) frame(n, true); }, 16);
 
 function drawNet() {
   const { x0, x1, y0, y1, depth } = G;
@@ -208,7 +233,6 @@ function drawPosts() {
 let S = null, gen = 0;
 const CANCEL = Symbol('cancel');
 async function W8(p, g) { const v = await p; if (g !== gen) throw CANCEL; return v; }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let heat = false;
 
 // hand-authored histories. kicks: {col,row,type,res:'goal'|'save'|'miss', dive:{col,row}}
@@ -230,6 +254,11 @@ const START = {
 function startPhase(id) {
   gen++;
   tweens.length = 0;
+  // players who were mid-exit when the phase changed leave with the cut; the two
+  // current players walk off normally in the next changeOver
+  cast = cast.filter((a) => a === actors.keeper || a === actors.kicker);
+  cast.forEach((a) => { a.alpha = 1; });
+  if (ball.held && !cast.includes(ball.held)) ball.held = null;
   const st = START[id];
   S = { phase: id, variant: st.variant, ours: [...st.ours], theirs: [...st.theirs], sel: { col: 2, row: 1 }, type: 'placed' };
   S.oskar = new Oskar(S.ours.map((k) => ({ col: k.col, row: k.row, type: k.type })), S.ours.map((k) => k.dive));
@@ -257,18 +286,24 @@ function decided() {
   return a === b && ga !== gb;
 }
 function renderTally() {
-  const row = (team, arr) => {
-    const pips = Array.from({ length: Math.max(5, arr.length) }, (_, i) => {
-      const k = arr[i];
+  // always 5 pip slots so the tally never grows; in sudden death they show the
+  // latest rounds and a small "R6–10" label says which
+  const first = Math.max(0, Math.max(S.ours.length, S.theirs.length) - 5);
+  const row = (team, arr, label) => {
+    const pips = Array.from({ length: 5 }, (_, j) => {
+      const k = arr[first + j];
       return `<i class="pip ${k ? k.res : ''}">${k ? (k.res === 'goal' ? '✓' : '✕') : ''}</i>`;
     }).join('');
-    return `${crestSVG(team, 20)}<b>${goals(arr)}</b><span class="pips">${pips}</span>`;
+    return `${crestSVG(team, 20)}<b>${goals(arr)}</b><span class="pips">${pips}</span>${label}`;
   };
-  root.querySelector('[data-t=us]').innerHTML = row('sun', S.ours);
-  root.querySelector('[data-t=them]').innerHTML = row('red', S.theirs);
+  const lab = (top) => `<small class="win">${first && top ? `R${first + 1}–${first + 5}` : ''}</small>`;
+  root.querySelector('[data-t=us]').innerHTML = row('sun', S.ours, lab(true));
+  root.querySelector('[data-t=them]').innerHTML = row('red', S.theirs, lab(false));
   const rnd = Math.max(S.ours.length, S.theirs.length) + (S.ours.length === S.theirs.length ? 1 : 0);
-  $('.round').innerHTML = `<b>${rnd > 5 ? 'Sudden death' : 'Round ' + rnd}</b><span>${S.ours.length > S.theirs.length ? 'Wak in goal' : 'You shoot'}</span>`;
-  shell.setScore({ home: goals(S.ours), away: goals(S.theirs), clock: rnd > 5 ? 'SD' : 'PENS' });
+  const done = decided();
+  $('.round').innerHTML = done ? `<b>Full time</b><span>${goals(S.ours) > goals(S.theirs) ? 'Sunbirds win' : 'Redrock win'}</span>`
+    : `<b>${rnd > 5 ? 'Sudden death' : 'Round ' + rnd}</b><span>${S.ours.length > S.theirs.length ? 'Wak in goal' : 'You shoot'}</span>`;
+  shell.setScore({ home: goals(S.ours), away: goals(S.theirs), clock: done ? 'FT' : rnd > 5 ? 'SD' : 'PENS' });
 }
 
 async function run(g) {
@@ -276,7 +311,6 @@ async function run(g) {
     while (!decided()) {
       if (S.ours.length === S.theirs.length) await ourKick(g); else await theirKick(g);
       if (g !== gen) return;
-      renderTally();
     }
     await finish(g);
   } catch (e) { if (e !== CANCEL) throw e; }
@@ -307,6 +341,7 @@ document.addEventListener('keydown', (e) => {
   if (f) { e.preventDefault(); f(e); }
 });
 function moveSel(dc, dr) {
+  if (!S.sel) S.sel = { col: 1, row: 1 };
   S.sel.col = Math.max(0, Math.min(2, S.sel.col + dc));
   S.sel.row = Math.max(0, Math.min(1, S.sel.row + dr));
   sfx.tick();
@@ -315,27 +350,38 @@ function moveSel(dc, dr) {
 function showBubble(html) { bubble.hidden = false; bubble.innerHTML = html; bubble.classList.remove('pop'); void bubble.offsetWidth; bubble.classList.add('pop'); }
 
 // ------------------------------------------------------------------ our kick
+function setWaiting(text) { actEl.innerHTML = `<div class="wait">${text}</div>`; }
+function showResult(cls, head, body) {
+  oddsEl.innerHTML = `<div class="ol2 res ${cls}">${head}</div><div class="ol1">${body}</div>`;
+}
+
 async function ourKick(g) {
   const shooter = byId[OURS[S.ours.length % OURS.length]];
   const osk = S.oskar;
   bubble.hidden = true;
-  await W8(placeActors(g, shooter, byId.oskar), g);
+  clearCells();
+  setWaiting(`${shooter.name} places the ball…`);
   whoEl.innerHTML = `<img src="${portrait(shooter, 56)}" alt=""><span><b>${shooter.name}</b> to shoot<small>SHO ${shooter.stats.shoot}${shooter.id === 'sol' ? ' · Late Show' : ''}</small></span>`;
+  await W8(changeOver(g, shooter, byId.oskar), g);
+  // Oskar shows his read: he shades a step toward the side his notes favour.
+  if (!S.sel) S.sel = { col: 2, row: 1 };
+  const lean = osk.lean();
+  const kp = actors.keeper;
+  if (osk.n) { kp.look = lean.col - 1; tween(kp, { x: W / 2 + (lean.col - 1) * W * 0.025 }, 0.5); }
 
   const committed = await W8(new Promise((resolve) => {
     const refresh = () => {
       const vals = [0, 1].map((r) => [0, 1, 2].map((c) => osk.goalOdds(c, r, S.type, shooter)));
       renderCells(vals, '', S.sel, heat ? osk.cover() : null);
       const p = vals[S.sel.row][S.sel.col];
-      const cd = osk.colDist();
       const dives = osk.dives.map((d) => COL_SHORT[d.col]).join(' ');
       const cnt = osk.colCounts();
-      const lean = osk.lean();
       const n = osk.n;
+      const rr = osk.repeatRate();
       const why = n === 0 ? 'Oskar has no notes on you yet: his dive is a guess.'
-        : `You've shot ${cnt.map((v, i) => `${COL_SHORT[i]} ${v}`).join(' · ')}. ${osk.repeatRate() ? `You repeat your side ${osk.repeatRate().reps}/${osk.repeatRate().of}. ` : ''}Oskar leans <b>${COLS[lean.col]}</b> (${Math.round(lean.p * 100)}%).`;
+        : `You've shot ${cnt.map((v, i) => `${COL_SHORT[i]} ${v}`).join(' · ')}. ${rr ? `Same side ${rr.reps}/${rr.of}. ` : ''}Oskar leans <b>${COLS[lean.col]}</b> (${Math.round(lean.p * 100)}%).`;
       oddsEl.innerHTML = `<div class="ol1">${why}</div>
-        <div class="ol2">${cellName(S.sel.col, S.sel.row)} · ${S.type} → ${oddsPill(p, 'goal')}<span class="muted">${S.type === 'power' ? ` over the bar ${Math.round((1 - onTarget(S.sel.col, S.sel.row, 'power', shooter)) * 100)}%` : ''}${dives ? ` · Oskar dove: ${dives}` : ''}</span></div>`;
+        <div class="ol2">${cellName(S.sel.col, S.sel.row)} · ${S.type} → ${oddsPill(p, 'goal')}<span class="muted">${S.type === 'power' ? ` over/wide ${Math.round((1 - onTarget(S.sel.col, S.sel.row, 'power', shooter)) * 100)}%` : ''}${dives ? ` · he dived: ${dives}` : ''}</span></div>`;
       actEl.innerHTML = `
         <div class="seg"><button class="btn small ${S.type === 'placed' ? 'blue' : 'paper'}" data-t="placed"><span class="key">1</span>Placed</button><button class="btn small ${S.type === 'power' ? 'red' : 'paper'}" data-t="power"><span class="key">2</span>Power</button></div>
         <button class="btn small paper icon" data-a="nb" title="Oskar's notebook (N)">📓</button>
@@ -358,26 +404,43 @@ async function ourKick(g) {
     };
     refresh();
   }), g);
-  actEl.innerHTML = '<div class="wait">…</div>';
   const pShown = osk.goalOdds(committed.col, committed.row, committed.type, shooter);
-  const dive = osk.pick();
+  const forced = takeForce();
+  const dive = forced?.dive || osk.pick();
   const cdBefore = osk.colDist();
-  const on = Math.random() < onTarget(committed.col, committed.row, committed.type, shooter);
-  const saved = on && dive.col === committed.col && Math.random() < saveIfRightCol(dive.row === committed.row, committed.type);
-  const res = !on ? 'miss' : saved ? 'save' : 'goal';
-  renderCells(null, '', null, null);
-  await W8(animateKick(g, committed, dive, res, false), g);
-  const kick = { col: committed.col, row: committed.row, type: committed.type, res, dive };
-  S.ours.push(kick);
-  osk.record({ col: kick.col, row: kick.row, type: kick.type }, dive);
-  const where = cellName(kick.col, kick.row);
-  const lean = `he rated ${COLS[dive.col]} at ${Math.round(cdBefore[dive.col] * 100)}%`;
-  if (res === 'goal') shell.log(`⚽ ${shooter.name} scores ${where} (${kick.type}, ${Math.round(pShown * 100)}%). Oskar dived ${COLS[dive.col]}: ${lean}.`, 'goal', 'R' + S.ours.length);
-  else if (res === 'save') shell.log(`🧤 Oskar saves ${shooter.name}'s ${where} ${kick.type}. He read it: ${lean}.`, 'bad', 'R' + S.ours.length);
-  else shell.log(`💨 ${shooter.name}'s power shot sails ${kick.row === 0 ? 'over the bar' : 'wide'}. Oskar dived ${COLS[dive.col]}.`, 'bad', 'R' + S.ours.length);
-  shell.toast(`📓 Oskar scribbles: “${shooter.name} → ${where}, ${kick.type}.”`);
-  renderTally();
-  await W8(sleep(900), g);
+  const out = forced?.out || resolveKick(committed.col, committed.row, committed.type, dive, shooter);
+  clearCells(); keepSel(committed);
+  setWaiting(`${shooter.name} runs up…`);
+  const where = cellName(committed.col, committed.row);
+  const rated = `he rated ${COLS[dive.col]} ${Math.round(cdBefore[dive.col] * 100)}%`;
+  await W8(playKick(g, committed, dive, out, false, () => {
+    // Contact frame: the score, pip and log change here, not before.
+    const kick = { col: committed.col, row: committed.row, type: committed.type, res: out.res, dive };
+    S.ours.push(kick);
+    osk.record({ col: kick.col, row: kick.row, type: kick.type }, dive);
+    renderTally();
+    const R = 'R' + S.ours.length, pc = Math.round(pShown * 100);
+    if (out.res === 'goal') {
+      shell.log(`⚽ ${shooter.name} scores ${where} (${kick.type}, ${pc}%). Oskar dived ${COLS[dive.col]}: ${rated}.`, 'goal', R);
+      showResult('good', `GOAL · you had ${pc}%`, out.how === 'beaten' ? `Oskar guessed ${COLS[dive.col]} but your ${kick.type} beat his hands.` : `Oskar dived ${COLS[dive.col]}: ${rated}.`);
+    } else if (out.res === 'save') {
+      shell.log(`🧤 Oskar saves ${shooter.name}'s ${where} ${kick.type}${out.how === 'legs' ? ' with his trailing legs' : ''}: ${rated}.`, 'bad', R);
+      showResult('bad', `SAVED · you had ${pc}%`, out.how === 'legs' ? `Oskar dived ${COLS[dive.col]}, but low down the middle clipped his trailing legs.` : `He read it: ${rated}.`);
+    } else {
+      shell.log(`💨 ${shooter.name}'s ${kick.type} shot goes ${out.how === 'over' ? 'over the bar' : 'wide'}. Oskar dived ${COLS[dive.col]}.`, 'bad', R);
+      showResult('bad', `${out.how === 'over' ? 'OVER' : 'WIDE'} · you had ${pc}%`, `${kick.type === 'power' ? 'Power can miss the target.' : 'Even placed shots miss sometimes.'} Oskar dived ${COLS[dive.col]}.`);
+    }
+  }), g);
+  shell.toast(`📓 Oskar scribbles: “${shooter.name} → ${where}, ${committed.type}.”`);
+}
+// Keep the chosen cell outlined while the kick plays, so the result points back at it.
+function keepSel(sel) {
+  cellsEl.innerHTML = '';
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) {
+    const d = document.createElement('div');
+    d.className = 'cell ghost' + (sel.col === c && sel.row === r ? ' aim' : '');
+    cellsEl.appendChild(d);
+  }
 }
 
 // ------------------------------------------------------------------ their kick
@@ -399,32 +462,34 @@ async function theirKick(g) {
   const tellPower = Math.random() < TELL_TRUTH ? kick.type === 'power' : kick.type !== 'power';
   const post = kickerPosterior(prior, tellCol, tellPower);
   bubble.hidden = true;
-  await W8(placeActors(g, shooter, byId.wak), g);
+  clearCells();
+  setWaiting(`${shooter.name} places the ball…`);
+  whoEl.innerHTML = `<img src="${portrait(shooter, 56)}" alt=""><span><b>${shooter.name}</b> to shoot<small>${prof.note}</small></span>`;
+  await W8(changeOver(g, shooter, byId.wak), g);
+  // The tells play on the kicker: eyes toward a post, and a bouncing long run-up for power.
   actors.kicker.look = tellCol - 1;
   if (tellPower) { actors.kicker.pose = 'run'; actors.kicker.speed = 0.35; }
-  whoEl.innerHTML = `<img src="${portrait(shooter, 56)}" alt=""><span><b>${shooter.name}</b> to shoot<small>${prof.note}</small></span>`;
   const eyes = ['your left post', 'straight at you', 'your right post'][tellCol];
-  showBubble(`<span class="ti">👀</span><span>Eyes on <b>${eyes}</b><br>${tellPower ? '💥 Long run-up (power?)' : '👣 Short run-up (placed?)'}<small>tells are true ~${Math.round(TELL_TRUTH * 100)}%</small></span>`);
-  S.sel = { col: 1, row: 1 };
+  showBubble(`<span class="ti">👀</span><span>Eyes: <b>${eyes}</b><br>${tellPower ? '💥 Long run-up (power?)' : '👣 Short run-up (placed?)'}<small>tells are true ~${Math.round(TELL_TRUTH * 100)}%</small></span>`);
+  S.sel = null; // nothing pre-picked: read the tell first
 
   const committed = await W8(new Promise((resolve) => {
     const refresh = () => {
       const vals = [0, 1].map((r) => [0, 1, 2].map((c) => stopOdds(post, c, r, shooter)));
       renderCells(vals, '', S.sel, heat ? post.cells : null);
-      const p = vals[S.sel.row][S.sel.col];
+      const p = S.sel ? vals[S.sel.row][S.sel.col] : null;
       const colP = [0, 1, 2].map((c) => post.cells[0][c] + post.cells[1][c]);
-      const live = prof.live ? ' ' + prof.live(cx) : '';
-      oddsEl.innerHTML = `<div class="ol1">📓 ${prof.note}${live}</div>
-        <div class="ol2">Your read: ${colP.map((v, i) => `${COL_SHORT[i]} ${Math.round(v * 100)}%`).join(' · ')} · power ${Math.round(post.power * 100)}%</div>
-        <div class="ol2">Cover ${cellName(S.sel.col, S.sel.row)} → ${oddsPill(p, 'stop')}</div>`;
+      const live = prof.live ? prof.live(cx) + ' ' : '';
+      oddsEl.innerHTML = `<div class="ol1">${live}Your read: ${colP.map((v, i) => `${COL_SHORT[i]} ${Math.round(v * 100)}%`).join(' · ')} · power ${Math.round(post.power * 100)}%</div>
+        <div class="ol2">${S.sel ? `Cover ${cellName(S.sel.col, S.sel.row)} → ${oddsPill(p, 'stop')}` : '<span class="muted">Read the tell, then tap a spot to cover.</span>'}</div>`;
       actEl.innerHTML = `
         <button class="btn small ${heat ? 'red' : 'paper'} icon" data-a="heat" title="Heat-map of your read (V)">🔥</button>
-        <span class="hint muted">Pick a spot to cover</span>
-        <button class="btn go purple" data-a="go">Dive! <span class="key">⏎</span></button>`;
+        <span class="hint muted">Tap a spot for Wak to cover</span>
+        <button class="btn go purple" data-a="go" ${S.sel ? '' : 'disabled title="Pick a spot first"'}>Dive! <span class="key">⏎</span></button>`;
       actEl.querySelector('[data-a=heat]').onclick = () => { sfx.click(); heat = !heat; refresh(); };
       actEl.querySelector('[data-a=go]').onclick = () => { sfx.click(); go(); };
     };
-    const go = () => { keymap = {}; onCell = null; resolve({ ...S.sel }); };
+    const go = () => { if (!S.sel) { sfx.tick(); return; } keymap = {}; onCell = null; resolve({ ...S.sel }); };
     onCell = (c, r) => { S.sel = { col: c, row: r }; refresh(); };
     keymap = {
       ArrowLeft: () => { moveSel(-1, 0); refresh(); }, ArrowRight: () => { moveSel(1, 0); refresh(); },
@@ -434,82 +499,368 @@ async function theirKick(g) {
     };
     refresh();
   }), g);
-  actEl.innerHTML = '<div class="wait">…</div>';
   const pShown = stopOdds(post, committed.col, committed.row, shooter);
-  const on = Math.random() < onTarget(kick.col, kick.row, kick.type, shooter);
-  const saved = on && committed.col === kick.col && Math.random() < saveIfRightCol(committed.row === kick.row, kick.type);
-  const res = !on ? 'miss' : saved ? 'save' : 'goal';
+  const forced = takeForce();
+  if (forced?.kick) Object.assign(kick, forced.kick);
+  const out = forced?.out || resolveKick(kick.col, kick.row, kick.type, committed, shooter);
   bubble.hidden = true;
-  renderCells(null, '', null, null);
-  await W8(animateKick(g, kick, committed, res, true), g);
-  const rec = { ...kick, res, dive: committed };
-  S.theirs.push(rec);
+  clearCells(); keepSel(committed);
+  setWaiting(`${shooter.name} runs up…`);
   const where = cellName(kick.col, kick.row);
   const tellTxt = tellCol === kick.col ? 'the eyes told the truth' : 'the eyes were a bluff';
-  const n = S.theirs.length;
-  if (res === 'goal') shell.log(`⚽ ${shooter.name} scores ${where} (${kick.type}); ${tellTxt}. Wak covered ${cellName(committed.col, committed.row)} (stop was ${Math.round(pShown * 100)}%).`, 'them', 'R' + n);
-  else if (res === 'save') shell.log(`🧤 Wak saves ${shooter.name}'s ${where} ${kick.type}! ${tellTxt[0].toUpperCase() + tellTxt.slice(1)}.`, 'good', 'R' + n);
-  else shell.log(`💨 ${shooter.name} blazes it over. Wak covered ${cellName(committed.col, committed.row)}.`, 'good', 'R' + n);
-  renderTally();
-  await W8(sleep(900), g);
+  await W8(playKick(g, kick, committed, out, true, () => {
+    S.theirs.push({ ...kick, res: out.res, dive: committed });
+    renderTally();
+    const R = 'R' + S.theirs.length, pc = Math.round(pShown * 100);
+    const cov = cellName(committed.col, committed.row);
+    if (out.res === 'goal') {
+      shell.log(`⚽ ${shooter.name} scores ${where} (${kick.type}); ${tellTxt}. Wak covered ${cov} (stop was ${pc}%).`, 'them', R);
+      showResult('bad', `GOAL · stop was ${pc}%`, `${shooter.name} went ${where}, ${kick.type}: ${tellTxt}.${out.how === 'beaten' ? ' Right side, but it beat Wak.' : ''}`);
+    } else if (out.res === 'save') {
+      shell.log(`🧤 Wak saves ${shooter.name}'s ${where} ${kick.type}${out.how === 'legs' ? ' with his trailing legs' : ''}! ${tellTxt[0].toUpperCase() + tellTxt.slice(1)}.`, 'good', R);
+      showResult('good', `SAVED · stop was ${pc}%`, out.how === 'legs' ? 'Low down the middle clipped Wak\'s trailing legs.' : `You read ${where}: ${tellTxt}.`);
+    } else {
+      shell.log(`💨 ${shooter.name} puts it ${out.how === 'over' ? 'over the bar' : 'wide'}. Wak covered ${cov}.`, 'good', R);
+      showResult('good', `${out.how === 'over' ? 'OVER' : 'WIDE'} · stop was ${pc}%`, `${shooter.name} missed the target (${kick.type}).`);
+    }
+  }), g);
 }
 
 // ------------------------------------------------------------------ animation
-async function placeActors(g, shooter, keeper) {
-  actors.keeper = { char: keeper, x: W / 2, y: G.y1 + 2, size: G.h * 0.82, pose: 'ready', facing: 1, look: 0 };
-  actors.kicker = { char: shooter, x: W * 0.12, y: H * 1.02, size: H * 0.42, pose: 'run', facing: 1, look: 0 };
-  ball.x = G.spot.x; ball.y = G.spot.y; ball.r = W * 0.026; ball.h = 0; ball.vis = true;
-  sfx.whistle();
-  await W8(tween(actors.kicker, { x: W * 0.3, y: H * 0.99 }, 0.6), g);
-  actors.kicker.pose = 'idle';
+const wait = (sec) => tween({ v: 0 }, { v: 1 }, sec);
+function stopTweens(o) { for (let i = tweens.length - 1; i >= 0; i--) if (tweens[i].o === o) tweens.splice(i, 1); }
+const kickMark = () => ({ x: G.spot.x - W * 0.08, y: G.spot.y + H * 0.1 });
+const runupMark = () => ({ x: W * 0.3, y: H * 0.99 });
+const keeperHome = () => ({ x: W / 2, y: G.y1 + 2 });
+// Where a held ball sits on its carrier.
+function holdPt(a) {
+  if (a.holdOff) return { x: a.x + a.holdOff.x, y: a.y + a.holdOff.y };
+  return { x: a.x + a.facing * a.size * 0.14, y: a.y - a.size * 0.38 };
 }
-async function animateKick(g, kick, dive, res, wakInGoal) {
-  const kk = actors.kicker, kp = actors.keeper;
-  kk.pose = 'run'; kk.speed = 1;
-  await W8(tween(kk, { x: G.spot.x - W * 0.09, y: G.spot.y + H * 0.1 }, 0.55, { ease: linear }), g);
-  kk.pose = 'kick'; sfx.kick();
-  const pt = cellPt(kick.col, kick.row);
-  let tx = pt.x, ty = pt.y;
-  if (res === 'miss') { ty = G.y0 - G.h * 0.55; tx = pt.x + (kick.col - 1) * W * 0.06; }
-  // keeper target
-  const dp = cellPt(dive.col, dive.row);
-  const side = dive.col - 1;
-  kp.pose = side === 0 ? (dive.row === 0 ? 'header' : 'ready') : 'dive';
-  kp.facing = side < 0 ? 1 : -1;
-  const kTo = { x: side === 0 ? W / 2 : dp.x - side * G.w * 0.12, y: dive.row === 0 ? G.y1 - G.h * 0.32 : G.y1 - G.h * 0.02 };
-  if (res === 'save') { tx = lerp(tx, kTo.x, 0.35); ty = lerp(ty, dp.y, 0.3); }
-  const dur = kick.type === 'power' ? 0.28 : 0.45;
-  await W8(Promise.all([
-    tween(ball, { x: tx, y: ty, r: W * 0.016 }, dur, { ease: linear, arc: kick.type === 'power' ? 6 : 14 }),
-    sleep(60).then(() => tween(kp, kTo, dur * 0.9)),
-  ]), g);
-  const sx = cv.getBoundingClientRect(), k = sx.width / W;
-  if (res === 'goal') {
-    ripple = { a: 7, x: tx, y: ty };
-    excite = 1;
-    freeze(90);
-    if (!wakInGoal) {
-      sfx.goal(); shell.flash('#fff'); shell.shake(); shell.confetti(); shell.banner('GOAL!', kk.char.name);
-      kk.pose = 'celebrate'; kp.pose = 'sad';
-    } else {
-      sfx.groan(); shell.shake(); shell.banner('GOAL…', kk.char.name, '#ff8a80');
-      kk.pose = 'celebrate'; kp.pose = 'sad';
+const keeperSize = () => G.h * 0.66;
+const kickerSize = () => H * 0.33;
+
+// Keeper sprite geometry, measured from shared/art.js drawPlayer (design units,
+// 44 = sprite height, feet at 0,0, x for facing = 1; mirror x for facing = -1).
+// box: the whole sprite incl. hair; glove: the glove the ball should meet.
+// The dive pose lies the body toward -facing; its front glove sits on the face,
+// so saves use the lower (back) glove, which is clear of the head.
+const KG = {
+  dive: { box: [-50, 5, -25.5, 7], glove: { x: -30.5, y: 3 } },
+  header: { box: [-13.5, 13.5, -56.5, 0], glove: { x: 0, y: -25.6 } },
+  ready: { box: [-19.5, 19.5, -46.5, 3.5], glove: { x: 0, y: -15 } },
+};
+function kBox(k, pose, facing, at) {
+  const s = k.size / 44, b = KG[pose].box;
+  const xa = facing > 0 ? b[0] : -b[1], xb = facing > 0 ? b[1] : -b[0];
+  return { x0: at.x + xa * s, x1: at.x + xb * s, y0: at.y + b[2] * s, y1: at.y + b[3] * s };
+}
+// Where the ball centre sits when it meets the glove (touching, on the side
+// away from the body), relative to the feet.
+function reach(k, pose, facing, br) {
+  const s = k.size / 44, gl = KG[pose].glove;
+  if (pose === 'dive') return { x: facing * (gl.x - 3 - br * 0.8) * s, y: gl.y * s };
+  return { x: 0, y: gl.y * s };
+}
+// Keep the whole keeper inside the goal frame (head under the bar, hair inside the posts).
+function clampFeet(k, pose, facing, feet) {
+  const pad = Math.max(5, W * 0.016) / 2 + 2;
+  const b = kBox(k, pose, facing, feet);
+  let dx = 0, dy = 0;
+  if (b.x0 < G.x0 + pad) dx = G.x0 + pad - b.x0;
+  if (b.x1 > G.x1 - pad) dx = G.x1 - pad - b.x1;
+  if (b.y0 < G.y0 + pad) dy = G.y0 + pad - b.y0;
+  const y = Math.min(feet.y + dy, G.y1 + 2);
+  return { x: feet.x + dx, y };
+}
+// Move a keeper sideways until his whole sprite has `gap` px of daylight from every point.
+function clearOf(k, pose, facing, feet, pts, gap) {
+  let f = { ...feet };
+  for (let i = 0; i < 6; i++) {
+    let worst = null;
+    for (const p of pts) {
+      const b = kBox(k, pose, facing, f);
+      if (p.x > b.x0 - gap && p.x < b.x1 + gap && p.y > b.y0 - gap && p.y < b.y1 + gap) {
+        const cx = (b.x0 + b.x1) / 2;
+        const need = p.x >= cx ? p.x - (b.x1 + gap) : p.x - (b.x0 - gap); // shift that clears this point
+        if (!worst || Math.abs(need) > Math.abs(worst)) worst = need;
+      }
     }
-    await W8(tween(ball, { y: ty - G.depth * 0.3, r: W * 0.014 }, 0.15), g);
-  } else if (res === 'save') {
-    sfx.save(); freeze(140); shell.shake();
-    shell.banner('SAVED!', kp.char.name, wakInGoal ? '#9ef0a8' : '#d6c4ff');
-    if (wakInGoal) { shell.confetti(80, ['#3BB273', '#FFD23F', '#fff']); kk.pose = 'sad'; } else kk.pose = 'sad';
-    await W8(tween(ball, { x: tx + (Math.random() - 0.5) * W * 0.5, y: G.y1 + H * 0.12, r: W * 0.02 }, 0.4, { arc: 30 }), g);
+    if (!worst) break;
+    f.x += worst;
+  }
+  return f;
+}
+
+function newKeeper(char, fromX) {
+  return { role: 'keeper', char, x: fromX, y: G.y1 + 2, size: keeperSize(), pose: 'run', facing: fromX < W / 2 ? 1 : -1, look: 0, alpha: 1 };
+}
+function newKicker(char) {
+  return { role: 'kicker', char, x: -W * 0.12, y: H * 1.06, size: kickerSize(), pose: 'run', facing: 1, look: 0, alpha: 1 };
+}
+const placePt = () => ({ x: G.spot.x - kickerSize() * 0.14, y: G.spot.y + H * 0.1 });
+
+// Between kicks: players who are not needed walk off, the next pair walks on,
+// and the ball reaches the spot by being carried, rolled out or rolled in.
+// A character is only ever one sprite: in sudden death a keeper who is due to
+// kick walks out of his goal to the spot, and a kicker who is due in goal walks
+// up into it.
+async function changeOver(g, shooter, keeperChar) {
+  window.__jankCtx = 'changeover';
+  const olds = [actors.keeper, actors.kicker].filter(Boolean);
+  const take = (char) => { const i = olds.findIndex((o) => o.char === char); return i < 0 ? null : olds.splice(i, 1)[0]; };
+  const keeper0 = take(keeperChar), kicker0 = take(shooter);
+  const jobs = [];
+  const KS = keeperSize(), SS = kickerSize();
+  const getUp = async (a) => {
+    stopTweens(a);
+    if (a.role === 'keeper' && (a.y < G.y1 + 2 || a.pose === 'dive')) {
+      // swing up out of the dive: draw him upright but rotated flat, then rotate back
+      if (a.pose === 'dive') { a.tilt = -a.facing * 1.35; tween(a, { tilt: 0 }, 0.3); }
+      a.pose = 'idle'; await tween(a, { y: G.y1 + 2 }, 0.3);
+    }
+    a.tilt = 0;
+  };
+
+  // --- who leaves
+  let exitSide = actors.keeper && actors.keeper.x < W / 2 ? -1 : 1;
+  for (const o of olds) {
+    jobs.push((async () => {
+      await getUp(o);
+      o.pose = 'run'; o.speed = 1; o.look = 0;
+      if (o.role === 'keeper') {
+        o.facing = exitSide;
+        await Promise.all([tween(o, { x: exitSide < 0 ? -W * 0.16 : W * 1.16 }, 0.95, { ease: linear }), wait(0.55).then(() => tween(o, { alpha: 0 }, 0.4))]);
+      } else {
+        o.facing = 1;
+        await Promise.all([tween(o, { x: W * 1.15, y: H * 1.12 }, 0.95, { ease: linear }), wait(0.5).then(() => tween(o, { alpha: 0 }, 0.4))]);
+      }
+      cast = cast.filter((a) => a !== o);
+      if (ball.held === o) { ball.held = null; ball.vis = false; delete o.holdOff; }
+    })());
+  }
+
+  // --- the keeper
+  let keeper = keeper0;
+  if (keeper) {
+    const wasKicker = keeper.role === 'kicker';
+    jobs.push((async () => {
+      await getUp(keeper);
+      keeper.pose = 'run'; keeper.speed = 1; keeper.look = 0;
+      keeper.facing = keeper.x < W / 2 ? 1 : -1;
+      if (wasKicker) await wait(0.3); // let the ball leave first
+      keeper.role = 'keeper';
+      await tween(keeper, { ...keeperHome(), size: KS }, wasKicker ? 1.1 : 0.6);
+    })());
+  } else {
+    keeper = newKeeper(keeperChar, exitSide < 0 ? W * 1.14 : -W * 0.14);
+    cast.push(keeper);
+    jobs.push(wait(0.15).then(() => tween(keeper, keeperHome(), 1.0, { ease: linear })));
+  }
+
+  // --- the kicker and the ball
+  let kicker = kicker0;
+  const fresh = !kicker;
+  if (fresh) { kicker = newKicker(shooter); cast.push(kicker); }
+  actors.keeper = keeper; actors.kicker = kicker;
+  const heldBy = ball.vis ? ball.held : null;
+  let plan;
+  if (heldBy && heldBy === kicker) plan = 'keep';           // he caught it and he kicks next
+  else if (heldBy && fresh) plan = 'rollout';               // a keeper rolls it out to the next kicker
+  else plan = fresh ? 'carry' : 'rollin';                   // new ball carried in, or rolled to the spot
+  if (plan !== 'keep' && plan !== 'rollout' && ball.vis) {
+    ball.held = null; stopTweens(ball);
+    jobs.push(tween(ball, { alpha: 0 }, 0.3).then(() => { ball.vis = false; }));
+  }
+  let rolled = null;
+  if (plan === 'rollout') {
+    const from = heldBy;
+    ball.held = null; delete from.holdOff; stopTweens(ball); ball.behind = false;
+    from.pose = 'pass';
+    rolled = tween(ball, { ...holdPt(kicker), r: W * 0.028 }, 0.6, { arc: 16 });
+  }
+  const place = async () => {
+    await tween(kicker, { ...placePt(), size: SS }, fresh ? 0.85 : 1.0);
+    kicker.pose = 'pass';
+    if (ball.held === kicker) { delete kicker.holdOff; ball.held = null; }
+    await tween(ball, { x: G.spot.x, y: G.spot.y, r: W * 0.026, h: 0 }, 0.25);
+    sfx.thud();
+  };
+  jobs.push((async () => {
+    if (!fresh) await getUp(kicker);
+    kicker.role = 'kicker'; kicker.pose = 'run'; kicker.speed = 1; kicker.look = 0; kicker.facing = 1;
+    if (plan === 'keep') {
+      ball.held = kicker; ball.behind = false;
+      await place();
+    } else if (plan === 'rollin') {
+      // he walks out to the run-up mark; a ball is rolled in to the spot from the side
+      await wait(0.35);
+      stopTweens(ball);
+      Object.assign(ball, { vis: true, alpha: 1, held: null, behind: false, h: 0, r: W * 0.03, x: -W * 0.08, y: H * 0.97 });
+      await Promise.all([
+        tween(ball, { x: G.spot.x, y: G.spot.y, r: W * 0.026 }, 0.9, { ease: (x) => 1 - (1 - x) * (1 - x) }),
+        tween(kicker, { ...runupMark(), size: SS }, 1.1),
+      ]);
+    } else {
+      if (rolled) await rolled; else await wait(0.35);
+      stopTweens(ball);
+      Object.assign(ball, { vis: true, alpha: 1, r: W * 0.028, h: 0, behind: false, held: kicker });
+      delete kicker.holdOff;
+      await place();
+    }
+    if (plan !== 'rollin') {
+      kicker.pose = 'run'; kicker.facing = -1;
+      await tween(kicker, runupMark(), 0.5);
+    }
+    kicker.facing = 1; kicker.pose = 'idle';
+  })());
+  await W8(Promise.all(jobs), g);
+  keeper.pose = 'ready'; keeper.facing = 1; keeper.look = 0; keeper.speed = 1;
+  ball.behind = null;
+  sfx.whistle();
+  window.__jankCtx = '';
+}
+
+// One kick, cause before effect. The ball's path is decided first, then the
+// keeper's dive is fitted to it: on a save his glove meets the ball on the same
+// frame; on a goal or a miss his whole sprite keeps at least a ball's width of
+// daylight from the end of the ball's path. Sound, banner and score fire on the
+// frame the ball reaches the goal line (onContact).
+async function playKick(g, kick, dive, out, wakInGoal, onContact) {
+  const kk = actors.kicker, kp = actors.keeper;
+  stopTweens(kp); stopTweens(kk);
+  window.__jankCtx = 'runup';
+  kk.pose = 'run'; kk.speed = 1; kk.look = 0;
+  await W8(tween(kk, kickMark(), 0.55, { ease: linear }), g);
+  kk.pose = 'kick'; sfx.kick();
+  window.__jankCtx = 'shot';
+
+  const aim = cellPt(kick.col, kick.row);
+  const ksd = kick.col - 1;               // -1 left, 0 middle, 1 right
+  const dsd = dive.col - 1;
+  const poseFor = (col, row) => (col === 1 ? (row === 0 ? 'header' : 'ready') : 'dive');
+  const faceFor = (col) => (col === 0 ? 1 : -1); // dive pose lies toward -facing
+  const dur = kick.type === 'power' ? 0.36 : 0.52;
+  const br = W * 0.016;                   // ball radius at the goal line
+  const arc = kick.type === 'power' ? 6 : 14;
+  let pose = poseFor(dive.col, dive.row), facing = faceFor(dive.col);
+  let keeperTo, ballTo = aim, kDur = dur - 0.06;
+  const s = kp.size / 44;
+
+  if (out.res === 'save' && out.how === 'hands') {
+    pose = poseFor(kick.col, kick.row); facing = faceFor(kick.col);
+    const r = reach(kp, pose, facing, br / s);
+    keeperTo = clampFeet(kp, pose, facing, { x: aim.x - r.x, y: aim.y - r.y });
+    ballTo = { x: keeperTo.x + r.x, y: keeperTo.y + r.y }; // glove and ball meet here
+  } else if (out.how === 'legs') {
+    // he dives away, but the low middle shot clips his trailing legs
+    keeperTo = { x: W / 2 + dsd * G.w * 0.07, y: G.y1 - G.h * 0.03 };
+    ballTo = { x: keeperTo.x - facing * 4 * s, y: keeperTo.y - 6 * s };
+  } else {
+    if (out.res === 'miss') {
+      if (out.how === 'over') ballTo = { x: aim.x + ksd * W * 0.04, y: G.y0 - G.h * 0.3 };
+      else {
+        const side = ksd || (Math.random() < 0.5 ? -1 : 1);
+        ballTo = { x: side < 0 ? G.x0 - G.w * 0.12 : G.x1 + G.w * 0.12, y: G.y1 - G.h * 0.04 }; // low, so it passes beside the post foot, not across it
+      }
+    }
+    if (out.how === 'beaten' && dive.row === kick.row) {
+      // right guess: he goes for it, and falls short of it
+      pose = poseFor(kick.col, kick.row); facing = faceFor(kick.col);
+      if (kick.col === 1) facing = Math.random() < 0.5 ? 1 : -1;
+      // top middle: he takes off sideways at it (a dive is a visible attempt), and ends short
+      if (kick.col === 1 && kick.row === 0) pose = 'dive';
+      const r = reach(kp, pose, facing, br / s);
+      keeperTo = { x: aim.x - r.x, y: aim.y - r.y };
+      kDur = dur * 0.85;
+    } else {
+      const dp = cellPt(dive.col, dive.row);
+      const r = reach(kp, pose, facing, br / s);
+      keeperTo = { x: dp.x - r.x, y: dp.y - r.y };
+    }
+    keeperTo = clampFeet(kp, pose, facing, keeperTo);
+    // daylight: sample the last stretch of the ball's drawn path (incl. its arc);
+    // earlier in flight the ball is well in front of him (drawn in front), so overlap there is depth, not contact
+    const from = { x: ball.x, y: ball.y };
+    const pts = [0.88, 0.94, 1].map((t) => ({ x: lerp(from.x, ballTo.x, t), y: lerp(from.y, ballTo.y, t) - arc * Math.sin(Math.PI * t) }));
+    keeperTo = clampFeet(kp, pose, facing, clearOf(kp, pose, facing, keeperTo, pts, br * 2.5));
+    keeperTo = clearOf(kp, pose, facing, keeperTo, pts, br * 2); // the posts win only if daylight survives
+  }
+  // in flight the ball is in front of the goal line, so it is drawn in front of the keeper
+  ball.behind = false;
+  ball.halo = out.res === 'miss';
+  kp.pose = pose === 'dive' ? 'ready' : pose; kp.facing = facing;
+  // the kicker follows through a little to his left so low contacts stay in view
+  tween(kk, { x: kk.x - W * 0.05, y: kk.y + H * 0.02 }, 0.4);
+  // ease-out: he springs fast and settles, so mid-flight he is already near his line
+  const keeperDone = wait(0.06).then(() => {
+    kp.pose = pose;
+    // the dive pose is drawn already lying flat; start it upright and swing it down
+    if (pose === 'dive') { kp.tilt = facing * 1.35; tween(kp, { tilt: 0 }, Math.min(0.16, kDur * 0.45)); }
+    return tween(kp, keeperTo, kDur, { ease: (x) => 1 - (1 - x) * (1 - x) });
+  });
+  await W8(tween(ball, { x: ballTo.x, y: ballTo.y, r: br }, dur, { ease: linear, arc }), g);
+
+  // ---- the ball reaches the goal line (or the glove)
+  window.__jankCtx = 'contact';
+  setWaiting(wakInGoal ? 'Your kick next' : 'Wak goes in goal next');
+  const sx = cv.getBoundingClientRect(), k = sx.width / W;
+  const pop = (t) => shell.popup(t, sx.left + ball.x * k, sx.top + (ball.y - ball.h) * k);
+  const land = async () => { await keeperDone; if (kp.y < G.y1 - 1) await tween(kp, { y: G.y1 + 2 }, 0.25, { ease: (x) => x * x }); };
+  // the banner lands a beat after the contact so the contact itself is seen first
+  const say = (...a) => { wait(0.16).then(() => shell.banner(...a)); };
+  const clampX = (x) => Math.max(ball.r + 6, Math.min(W - ball.r - 6, x));
+  if (out.res === 'goal') {
+    ball.behind = true; // it is in the net now, behind the keeper
+    ripple = { a: 7, x: ball.x, y: ball.y }; excite = 1;
+    if (!wakInGoal) { sfx.goal(); shell.flash('#fff'); shell.shake(); shell.confetti(); say('GOAL!', kk.char.name); }
+    else { sfx.groan(); shell.shake(); say('GOAL…', kk.char.name, '#ff8a80'); }
+    kk.pose = 'celebrate';
+    onContact(); pop('⚽');
+    // no stop at the line: it carries on into the net, then drops
+    await W8(Promise.all([
+      tween(ball, { y: ball.y - G.depth * 0.35, r: W * 0.014 }, 0.12, { ease: (x) => 1 - (1 - x) * (1 - x) })
+        .then(() => tween(ball, { y: G.y1 - G.depth * 0.35 }, 0.3, { ease: (x) => x * x })),
+      land(),
+    ]), g);
+    if (pose !== 'dive') kp.pose = 'sad';
+  } else if (out.res === 'save') {
+    sfx.save(); freeze(150); shell.shake();
+    say('SAVED!', kp.char.name, wakInGoal ? '#9ef0a8' : '#d6c4ff');
+    if (wakInGoal) shell.confetti(80, ['#3BB273', '#FFD23F', '#fff']);
+    kk.pose = 'sad';
+    onContact(); pop('🧤');
+    if (out.how === 'hands' && kick.col === 1) {
+      // straight at him: he holds it
+      await keeperDone;
+      kp.holdOff = { x: ball.x - kp.x, y: ball.y - kp.y }; ball.held = kp;
+      await W8(land(), g);
+    } else {
+      // pushed away: wide of the post, or back out off the legs (kept on the canvas)
+      const away = out.how === 'legs'
+        ? { x: clampX(ball.x - dsd * W * 0.16), y: G.y1 + H * 0.1 }
+        : { x: clampX(ball.x + ksd * W * 0.2), y: G.y1 + H * (kick.row === 0 ? 0.03 : 0.08) };
+      await W8(Promise.all([
+        tween(ball, { x: away.x, y: away.y, r: W * 0.02 }, 0.45, { arc: kick.row === 0 ? 26 : 14 }),
+        wait(0.08).then(land),
+      ]), g);
+      sfx.thud();
+    }
   } else {
     sfx.ooh();
-    shell.banner('OVER!', '', wakInGoal ? '#9ef0a8' : '#ff8a80');
+    say(out.how === 'over' ? 'OVER!' : 'WIDE!', '', wakInGoal ? '#9ef0a8' : '#ff8a80');
     kk.pose = 'sad';
-    await W8(tween(ball, { y: ty - 40, r: W * 0.01 }, 0.3), g);
-    ball.vis = false;
+    onContact(); pop('💨');
+    // it carries on into the stand and out of sight
+    const on = out.how === 'over' ? { x: ball.x + ksd * W * 0.03, y: ball.y - G.h * 0.3 } : { x: ball.x + (ball.x < W / 2 ? -1 : 1) * W * 0.08, y: ball.y - G.h * 0.25 };
+    await W8(Promise.all([
+      tween(ball, { ...on, alpha: 0 }, 0.4, { ease: linear }),
+      land(),
+    ]), g);
+    ball.vis = false; ball.halo = false;
   }
-  shell.popup(res === 'goal' ? '⚽' : res === 'save' ? '🧤' : '💨', sx.left + tx * k, sx.top + ty * k);
-  await W8(sleep(1300), g);
+  window.__jankCtx = '';
+  await W8(wait(1.1), g);
 }
 const freeze = (ms) => { freezeUntil = performance.now() + ms; };
 
@@ -531,7 +882,7 @@ function notebook() {
       <tr><td>You shot</td>${cnt.map((v) => `<td>${v}</td>`).join('')}</tr>
       <tr><td>He'll dive</td>${cd.map((v) => `<td>${Math.round(v * 100)}%</td>`).join('')}</tr></table>
       <div class="nbgrid">${[0, 1].map((r) => [0, 1, 2].map((c) => `<i style="background:rgba(232,70,58,${Math.min(0.85, cover[r][c] * 1.8)})">${Math.round(cover[r][c] * 100)}%</i>`).join('')).join('')}</div>
-      <p>Top ${top} · Low ${n - top} → he expects <b>${rd[0] > rd[1] ? 'top' : 'low'}</b> (${Math.round(Math.max(...rd) * 100)}%). Power ${pow} · Placed ${n - pow}.</p>
+      <p>Top ${top} · Low ${n - top} → ${Math.abs(rd[0] - rd[1]) < 0.01 ? 'no lean on height yet' : `he expects <b>${rd[0] > rd[1] ? 'top' : 'low'}</b> (${Math.round(Math.max(...rd) * 100)}%)`}. Power ${pow} · Placed ${n - pow}.</p>
       ${rr ? `<p>You kept the same side ${rr.reps} of ${rr.of} times, so he ${rr.rate > 0.45 ? 'expects a repeat' : rr.rate < 0.25 ? 'expects you to switch' : 'is unsure about repeats'}.</p>` : ''}
       ${lines ? `<ol class="nbl">${lines}</ol>` : ''}</div>`,
     buttons: [{ label: 'Close' }],
@@ -544,22 +895,23 @@ async function finish(g) {
   const won = ga > gb;
   keymap = {};
   clearCells(); bubble.hidden = true;
-  actEl.innerHTML = '';
-  oddsEl.innerHTML = `<div class="ol2" style="font-size:18px;font-family:var(--font-h)">${won ? 'Sunbirds win the shootout!' : 'Redrock win the shootout.'}</div>`;
+  setWaiting('Full time');
+  const last = oddsEl.querySelector('.res')?.textContent || '';
+  showResult(won ? 'good' : 'bad', won ? '🏆 Sunbirds win the shootout!' : 'Redrock win the shootout.', `${ga}–${gb}${last ? ` · last kick: ${last}` : ''}`);
   if (won) { sfx.win(); shell.confetti(200); } else sfx.lose();
-  if (actors.keeper) actors.keeper.pose = won ? 'sad' : 'celebrate';
-  if (actors.kicker) actors.kicker.pose = won ? 'celebrate' : 'sad';
+  // whoever is on the pitch reacts for their own team
+  for (const a of [actors.keeper, actors.kicker]) if (a && a.pose !== 'dive') a.pose = (a.char.team === 'sun') === won ? 'celebrate' : 'sad';
   const osk = S.oskar;
   const saves = S.ours.filter((k) => k.res === 'save').length;
   const read = S.ours.filter((k) => k.dive.col === k.col).length;
   shell.log(`${won ? '🏆 Sunbirds' : 'Redrock'} win ${ga}–${gb}. Oskar guessed your side ${read}/${S.ours.length} times.`, 'goal', 'FT');
-  await W8(sleep(1200), g);
+  await W8(wait(1.2), g);
   const idx = PHASES.findIndex((p) => p.id === S.phase);
   const next = PHASES[(idx + 1) % PHASES.length];
   const v = await shell.modal({
     title: won ? 'Shootout won!' : 'Shootout lost',
     html: `<p style="font-size:22px;font-family:var(--font-h);margin:4px 0">Sunbirds ${ga} – ${gb} Redrock</p>
-      <p>Oskar guessed your side <b>${read} of ${S.ours.length}</b> times and saved ${saves}. ${osk.n >= 4 ? 'By the end his notes were sharp.' : ''}</p>
+      <p>Oskar guessed your side <b>${read} of ${S.ours.length}</b> times and saved ${saves}. ${read / Math.max(1, S.ours.length) >= 0.5 ? 'His notes were reading you.' : read / Math.max(1, S.ours.length) <= 0.25 ? 'You kept him guessing.' : 'He read you some of the time.'}</p>
       <div class="notice"><b>What to notice:</b> did you start shooting against your own habits, or did it still feel like a coin flip?</div>`,
     buttons: [{ label: 'Replay', value: 'again' }, { label: `Next: ${next.label}`, value: 'next', cls: 'blue' }],
   });

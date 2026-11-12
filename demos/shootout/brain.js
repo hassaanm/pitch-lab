@@ -42,16 +42,17 @@ export class Oskar {
   }
   colCounts() { const f = [0, 0, 0]; this.hist.forEach((h) => f[h.col]++); return f; }
   colDist() {
-    const f = this.colCounts().map((x, i) => x + (i === 1 ? 0.4 : 0.8));
+    const f = this.colCounts().map((x, i) => x + (i === 1 ? 0.6 : 0.8));
     const rr = this.repeatRate();
     let p = f;
     if (rr) {
       const last = this.hist[this.n - 1].col;
       p = p.map((x, c) => x * 3 * (c === last ? rr.rate : (1 - rr.rate) / 2));
     }
-    // He never fully commits: a fifth of the time he just follows his gut.
+    // He never fully commits: 30% of the time he follows his gut, and his gut
+    // likes to stand tall in the middle (so the middle is never a free hole).
     const model = norm(p.map((x) => Math.pow(x, this.sharp)));
-    return model.map((v, i) => 0.8 * v + 0.2 * (i === 1 ? 0.2 : 0.4));
+    return model.map((v, i) => 0.7 * v + 0.3 * (i === 1 ? 0.5 : 0.25));
   }
   rowDist() {
     const top = this.hist.filter((h) => h.row === 0).length;
@@ -140,3 +141,15 @@ export function sampleKick(prior) {
   return { col: i % 3, row: (i / 3) | 0, type: Math.random() < prior.power ? 'power' : 'placed' };
 }
 export function sample(p) { let r = Math.random(); for (let i = 0; i < p.length; i++) { r -= p[i]; if (r <= 0) return i; } return p.length - 1; }
+
+// Resolve one kick with the same numbers the odds pills use (pGoalVs), and say
+// HOW it ended so the view can show the cause:
+//   miss: 'over' | 'wide'      save: 'hands' (right column) | 'legs' (low middle vs a side dive)
+//   goal: 'beaten' (right column, too slow) | 'wrong' (dived the other way)
+export function resolveKick(col, row, type, dive, shooter) {
+  const on = onTarget(col, row, type, shooter);
+  if (Math.random() >= on) return { res: 'miss', how: row === 0 ? 'over' : 'wide' };
+  const scores = Math.random() < pGoalVs(col, row, type, dive, shooter) / on;
+  if (scores) return { res: 'goal', how: dive.col === col ? 'beaten' : 'wrong' };
+  return { res: 'save', how: dive.col === col ? 'hands' : 'legs' };
+}

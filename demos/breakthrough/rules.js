@@ -27,7 +27,7 @@ export const DEF_TYPES = {
   marker:  { name: 'Man-marker',  letter: 'm', char: ['lu'], tip: 'Ignores the ball. Steps 2 toward the attacker he marks.' },
   sweeper: { name: 'Sweeper',     letter: 's', char: ['nils'], tip: 'Only slides sideways along his row, 2 squares toward the ball column.' },
   giant:   { name: 'Slow giant',  letter: 'g', char: ['dima'], tip: 'Steps 1 square, but only on turns 1 and 3. Rests on turn 2.' },
-  keeper:  { name: 'Keeper',      letter: 'k', char: ['oskar'], tip: 'Slides 1 along the goal line toward the ball. Covers his column and one either side.' },
+  keeper:  { name: 'Keeper',      letter: 'k', char: ['oskar'], tip: 'Slides 1 toward the ball. Covers his column ±1.' },
 };
 const BY_LETTER = Object.fromEntries(Object.entries(DEF_TYPES).map(([t, d]) => [d.letter, t]));
 
@@ -57,6 +57,7 @@ export function initState(p) {
   const { att, def, ball } = parse(p);
   const s = { turn: 1, turns: p.turns, att, def, ball, passUsed: false, status: 'play', reason: '' };
   s.plan = planDefenders(s);
+  s.aim = { x: att[ball].x, y: att[ball].y }; // the square defenders chase this turn
   return s;
 }
 
@@ -263,13 +264,16 @@ export function apply(s, a) {
     const n = clone(s);
     prev.forEach((p, i) => { n.def[i].x = p.to.x; n.def[i].y = p.to.y; });
     const tacklers = tacklersAfter(s, prev);
-    const info = { moves: prev, tacklers };
+    // name the attacker who body-blocks each stopped defender, so the view can show the contact
+    const blockers = prev.map((p) => (p.blockedAt ? s.att.findIndex((a) => a.x === p.blockedAt.x && a.y === p.blockedAt.y) : -1));
+    const info = { moves: prev, tacklers, blockers };
     if (tacklers.length) { n.status = 'lost'; n.reason = 'tackled'; return { state: n, info }; }
     if (n.turn >= n.turns) { n.status = 'lost'; n.reason = 'time'; return { state: n, info }; }
     n.turn++;
     n.passUsed = false;
     n.att.forEach((x) => { x.moved = false; });
     n.plan = planDefenders(n);
+    n.aim = { x: n.att[n.ball].x, y: n.att[n.ball].y };
     return { state: n, info };
   }
   return null;

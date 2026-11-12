@@ -25,12 +25,13 @@
   .pitchwrap { position: relative; border: 3px solid var(--ink); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); background: #2E3A59; }
   .modebadge { position: absolute; left: 8px; top: 6px; font-family: var(--font-h); font-size: 12px; background: rgba(0,0,0,.55); padding: 2px 8px; border-radius: 8px; color: var(--sun); }
   .modebadge.def { color: #ff8a80; }
+  .modebadge.low { top: auto; bottom: 6px; }
 
   /* zone track: each zone's wall HP */
-  .ztrack { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; min-height: 52px; }
+  .ztrack { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; height: 58px; }
   .zp { position: relative; border-radius: 10px; padding: 4px 5px; background: rgba(255,255,255,.06); border: 2px solid rgba(255,255,255,.15); font-size: 11px; display: flex; flex-direction: column; gap: 3px; }
   .zp b { font-family: var(--font-h); font-weight: 400; font-size: 12px; white-space: nowrap; display: flex; justify-content: space-between; gap: 2px; }
-  .zp b small { font-size: 10px; }
+  .zp b small { font-size: 11px; }
   .zp.on { background: var(--paper); color: var(--ink); border-color: var(--ink); box-shadow: 0 3px 0 var(--ink); }
   .zp.done { opacity: .45; }
   .zp .n { font-size: 11px; opacity: .8; }
@@ -38,17 +39,23 @@
   .hp i { display: block; height: 100%; background: linear-gradient(90deg, #ff8a80, #e8463a); transition: width .35s cubic-bezier(.3,1.4,.5,1); }
   .zp.hit { animation: zhit .35s; }
   @keyframes zhit { 20% { transform: translateX(-4px) rotate(-2deg); background: #fff; } 50% { transform: translateX(4px) rotate(1deg); } }
-  .threat { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; background: #3a1414; border: 3px solid var(--ink); border-radius: 12px; padding: 5px 8px; box-shadow: var(--shadow); font-size: 13px; }
-  .threat img { width: 40px; height: 40px; border-radius: 8px; border: 2px solid var(--ink); }
+  .threat { grid-column: 1 / -1; height: 58px; box-sizing: border-box; display: flex; gap: 8px; align-items: center; background: #3a1414; border: 3px solid var(--ink); border-radius: 12px; padding: 3px 8px; box-shadow: var(--shadow); font-size: 13px; }
+  .threat img { width: 40px; height: 40px; flex: none; border-radius: 8px; border: 2px solid var(--ink); }
   .threat .hp { display: inline-block; width: 90px; vertical-align: middle; }
   .threat .grow { flex: 1; }
 
-  .info { font-size: 12.5px; min-height: 30px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .info { font-size: 12.5px; height: 34px; line-height: 1.3; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+  .info .btn { flex: none; }
 
   /* dice */
   .tray { display: flex; align-items: center; gap: 8px; background: #2a2236; border: 3px solid var(--ink); border-radius: 14px; padding: 7px; min-height: 70px; box-shadow: inset 0 3px 0 rgba(0,0,0,.25); }
   .dice { display: flex; gap: 7px; flex: 1; flex-wrap: wrap; align-items: center; }
-  .tray .btn { flex: none; min-height: 44px; }
+  .tray .btn { flex: none; min-height: 44px; min-width: 104px; }
+  .ds.busy .tray .dice, .ds.busy .cards { pointer-events: none; }
+  .ds.busy #endbtn { opacity: .55; pointer-events: none; }
+  #endbtn { transition: opacity .2s; }
+  .die.hitnow { animation: hitnow .35s; }
+  @keyframes hitnow { 0% { transform: scale(1.3) rotate(-20deg); } 100% { transform: rotate(12deg) scale(.9); } }
   .die { --dc: #fff6e0; position: relative; width: 50px; height: 50px; border-radius: 12px; background: var(--dc); border: 3px solid var(--ink); box-shadow: 0 4px 0 var(--ink), inset -4px -4px 0 rgba(0,0,0,.12); display: inline-grid; place-items: center; cursor: pointer; transition: transform .1s; flex: none; user-select: none; touch-action: manipulation; }
   .die .pips { width: 70%; height: 70%; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
   .die .pips i { display: block; width: 72%; height: 72%; margin: auto; border-radius: 50%; }
@@ -78,8 +85,8 @@
   .sock { display: flex; flex-direction: column; align-items: center; cursor: pointer; width: 50%; max-width: 56px; min-width: 0; }
   .sock .hole { position: relative; width: 46px; height: 46px; border-radius: 11px; border: 3px dashed rgba(27,27,47,.45); background: rgba(27,27,47,.08); display: grid; place-items: center; transition: transform .1s, background .1s; }
   .sock .need { font-family: var(--font-h); font-size: 13px; opacity: .75; }
-  .sock .aname { font-size: 10px; font-weight: 900; text-align: center; line-height: 1.1; margin-top: 2px; }
-  .sock .aname small { display: block; font-size: 8.5px; opacity: .6; font-weight: 800; }
+  .sock .aname { font-size: 11px; font-weight: 900; text-align: center; line-height: 1.1; margin-top: 2px; min-height: 33px; overflow-wrap: anywhere; padding: 0 1px; }
+  .sock .aname small { display: block; font-size: 11px; opacity: .6; font-weight: 800; }
   .sock.ok .hole { border: 3px solid var(--good); background: #d5f5cf; animation: okpulse .8s ease-in-out infinite alternate; }
   @keyframes okpulse { to { transform: scale(1.06); box-shadow: 0 0 10px 2px rgba(46,158,79,.6); } }
   .sock.no .hole { opacity: .45; }
@@ -90,8 +97,10 @@
   .pv { position: absolute; top: -9px; right: -10px; font-family: var(--font-h); font-size: 11px; color: #fff; background: var(--navy); border: 2px solid var(--ink); border-radius: 99px; padding: 0 5px; white-space: nowrap; z-index: 2; }
   .pv.odds-hi { background: var(--good); } .pv.odds-mid { background: var(--warn); } .pv.odds-lo { background: #e07a1f; } .pv.odds-vlo { background: var(--bad); }
   .ups { display: flex; gap: 5px; flex-wrap: wrap; }
-  @media (max-width: 480px) { .die { width: 42px; height: 42px; border-radius: 10px; } .dice { gap: 5px; } .tray { padding: 6px; gap: 6px; } .tray .btn { padding: 8px 10px; font-size: 15px; } }
-  @media (max-width: 360px) { .sock .hole { width: 40px; height: 40px; } .die { width: 38px; height: 38px; } }
+  @media (max-width: 480px) { .die { width: 42px; height: 42px; border-radius: 10px; } .dice { gap: 5px; } .tray { padding: 6px; gap: 6px; } .tray .btn { padding: 8px 10px; font-size: 15px; min-width: 96px; }
+    /* Dice stay 42 px. With the Fifth Die, Split can make 6: the tray reserves a second row for the whole match, so it never grows mid-turn. */
+    .ds.six .dice { min-height: 88px; align-content: flex-start; } }
+  @media (max-width: 360px) { .sock .hole { width: 40px; height: 40px; } }
 </style>
 </head>
 <body>

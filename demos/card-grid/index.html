@@ -38,7 +38,7 @@
   .gcard .bestp { position: absolute; top: 58px; right: 8px; font-family: var(--font-h); font-size: 11px; color: #fff; padding: 0 5px; border-radius: 99px; border: 1.5px solid var(--ink); z-index: 2; }
   .bestp.hi { background: var(--good); } .bestp.mid { background: var(--warn); } .bestp.lo { background: #e07a1f; } .bestp.vlo { background: var(--bad); }
   @media (max-width: 480px) {
-    .hand .gcard { width: 76px; height: 120px; margin: 0 -2px; }
+    .hand .gcard { width: 73px; height: 120px; margin: 0 -2px; }
     .hand .gcard .art { height: 34px; margin: 3px 4px 0; font-size: 20px; }
     .hand .gcard .text { font-size: 8.6px; padding: 1px 3px 5px; line-height: 1.15; }
     .hand .gcard .name { font-size: 10px !important; padding-left: 20px; }
@@ -46,6 +46,10 @@
     .hand .gcard .cost { width: 22px; height: 22px; font-size: 13px; }
     .hand .gcard .bestp { top: 42px; right: 5px; font-size: 10px; }
     .hand .gcard .kbdh { display: none; }
+  }
+  @media (max-width: 380px) {
+    .hand .gcard { width: 70px; margin: 0 -1px; }
+    .hand .gcard .text { font-size: 8.2px; }
   }
 
   .bottombar { display: flex; gap: 8px; align-items: center; padding: 0 2px; }

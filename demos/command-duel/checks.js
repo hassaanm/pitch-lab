@@ -36,7 +36,13 @@ export function timingCheck(kind, o = {}) {
       lbl.textContent = res === 'perfect' ? 'PERFECT!' : res === 'good' ? 'GOOD' : 'MISS';
       wrap.querySelector('.tc').appendChild(lbl);
       (res === 'perfect' ? sfx.perfect : res === 'good' ? sfx.good : sfx.bad)();
-      setTimeout(() => { wrap.remove(); resolve(res); }, 520);
+      setTimeout(() => {
+        // A short invisible shield eats late taps, so a fast "up" tap after the
+        // check cannot fall through to the phase tabs at the top of the page.
+        wrap.innerHTML = ''; wrap.style.background = 'none';
+        setTimeout(() => wrap.remove(), 450);
+        resolve(res);
+      }, 520);
     };
     active = (c) => finish('miss', c);
 

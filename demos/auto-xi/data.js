@@ -127,3 +127,12 @@ export const ROUNDS = [
 ];
 export const HP_MAX = 10;
 export { CAST };
+
+// Board slot -> home spot on the match pitch, in the frame of the side attacking
+// UP ([u, v], v = 0 is the goal it attacks). Row 0 front, 1 mid, 2 back; 'gk' keeper.
+// The shared match view mirrors these for the opponent.
+export function slotUV(slot) {
+  if (slot === 'gk') return [0.5, 0.95];
+  const row = Math.floor(slot / 3), col = slot % 3;
+  return [[0.2, 0.5, 0.8][col], [0.4, 0.58, 0.76][row]];
+}

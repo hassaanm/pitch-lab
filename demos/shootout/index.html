@@ -11,7 +11,10 @@
   .trows { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .trow { display: flex; align-items: center; gap: 6px; }
   .trow b { font-family: var(--font-h); font-weight: 400; font-size: 18px; color: var(--sun); min-width: 14px; text-align: center; }
-  .pips { display: flex; gap: 4px; flex-wrap: wrap; }
+  .pips { display: flex; gap: 4px; flex-wrap: nowrap; }
+  .trow .win { font-size: 10px; font-weight: 800; opacity: .65; white-space: nowrap; min-width: 0; }
+  .tally { height: 62px; box-sizing: border-box; }
+  .sm-actions .go:disabled { opacity: .5; }
   .pip { width: 20px; height: 20px; border-radius: 50%; border: 2px solid rgba(255,255,255,.3); display: grid; place-items: center; font-style: normal; font-size: 11px; font-weight: 900; }
   .pip.goal { background: var(--good); border-color: var(--ink); color: #fff; animation: pipIn .35s cubic-bezier(.2,1.6,.4,1); }
   .pip.save, .pip.miss { background: var(--bad); border-color: var(--ink); color: #fff; animation: pipIn .35s cubic-bezier(.2,1.6,.4,1); }
@@ -30,16 +33,18 @@
   }
   .cell:hover { background: rgba(255,255,255,.16); }
   .cell.sel { border: 3px solid var(--sun); background: rgba(255,210,63,.25); box-shadow: 0 0 0 2px var(--ink), inset 0 0 12px rgba(255,210,63,.6); transform: scale(1.03); }
+  .cell.ghost { cursor: default; border-color: transparent; background: none; pointer-events: none; }
+  .cell.ghost.aim { border: 2px dashed rgba(255,210,63,.75); }
   .cell .odds { font-size: 12.5px; padding: 0 6px; }
   .cell small { font-size: 10px; font-weight: 900; color: #fff; text-shadow: 0 1px 0 #000; }
   .bubble {
-    position: absolute; left: 6px; bottom: 6px; max-width: 58%; display: flex; gap: 6px; align-items: center;
+    position: absolute; left: 6px; top: 5px; max-width: calc(100% - 12px); display: flex; gap: 6px; align-items: center;
     background: #fff; color: var(--ink); border: 2.5px solid var(--ink); border-radius: 12px; padding: 4px 8px; font-size: 12.5px; font-weight: 800; line-height: 1.2;
   }
   .bubble[hidden] { display: none; }
   .bubble.pop { animation: pop .3s cubic-bezier(.2,1.5,.4,1); }
   .bubble .ti { font-size: 20px; }
-  .bubble small { display: block; font-size: 9.5px; opacity: .55; }
+  .bubble small { font-size: 10px; opacity: .55; margin-left: 4px; }
   @keyframes pop { from { transform: scale(.4); opacity: 0; } }
   .who {
     position: absolute; right: 6px; bottom: 6px; display: flex; gap: 6px; align-items: center; max-width: 46%;
@@ -51,7 +56,10 @@
   .who small { display: block; font-size: 9.5px; font-weight: 800; opacity: .7; }
 
   .ctl { padding: 8px; display: flex; flex-direction: column; gap: 7px; }
-  .oddsline { font-size: 12.5px; line-height: 1.3; display: flex; flex-direction: column; gap: 3px; min-height: 40px; }
+  /* fixed height: the panel never grows or shrinks between states */
+  .oddsline { font-size: 12.5px; line-height: 1.3; display: flex; flex-direction: column; gap: 3px; height: 70px; overflow: hidden; }
+  .oddsline .res { font-family: var(--font-h); font-weight: 400; font-size: 17px; }
+  .oddsline .res.good { color: #2f9c5c; } .oddsline .res.bad { color: #d23a2f; }
   .oddsline .ol2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-weight: 900; }
   .oddsline .muted { font-size: 11px; color: #6a6f8a; }
   .sm-actions { display: flex; gap: 6px; align-items: center; min-height: 46px; }

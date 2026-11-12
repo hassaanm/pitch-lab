@@ -66,7 +66,7 @@ export function passOdds(m, passer, from, to, defSide, o = {}, P = posMap(m)) {
   return { p: clamp(0.97 - 0.035 * d - 0.27 * n + skill + (o.bonus || 0), 0.08, 0.97), blockers: bl };
 }
 
-// Shot ≈ (shoot/10)·(1.15 − 0.14·dist) − 0.10 keeper set − 0.12 per adjacent defender, clamp .03–.85
+// Shot ≈ (shoot/10)·(1.25 − 0.15·dist) − 0.10 keeper set − 0.10 per adjacent defender, clamp .03–.85
 export function shotDist(sideAtk, at) {
   const goalRow = sideAtk === 'you' ? -0.5 : ROWS - 0.5;
   return Math.hypot((at[0] - 3) * 0.8, at[1] - goalRow);
@@ -74,7 +74,7 @@ export function shotDist(sideAtk, at) {
 export function shotOdds(m, shooter, at, o = {}, P = posMap(m)) {
   const sAtk = shooter.side, dSide = other(sAtk);
   const d = shotDist(sAtk, at);
-  let p = (st(shooter).shoot / 10) * (1.15 - 0.14 * d);
+  let p = (st(shooter).shoot / 10) * (1.25 - 0.15 * d);
   const parts = [];
   const gk = side(m, dSide).find((u) => char(u).pos === 'GK');
   const keeperSet = !(sAtk === 'you' && m.flags.keeperUnset);
@@ -82,17 +82,17 @@ export function shotOdds(m, shooter, at, o = {}, P = posMap(m)) {
   if (!o.ignoreAdj) {
     const adj = side(m, dSide).filter((u) => char(u).pos !== 'GK' && cheb(P[u.uid], at) <= 1);
     const n = adj.reduce((a, u) => a + weight(u), 0);
-    if (n) { p -= 0.12 * n; parts.push(`${adj.length} blocker${adj.length > 1 ? 's' : ''} −${Math.round(12 * n)}`); }
+    if (n) { p -= 0.1 * n; parts.push(`${adj.length} blocker${adj.length > 1 ? 's' : ''} −${Math.round(10 * n)}`); }
   }
   if (sAtk === 'opp' && m.flags.wall) { p -= 0.25; parts.push('Brick Wall −25'); }
   if (o.bonus) { p += o.bonus; parts.push(`+${Math.round(o.bonus * 100)}`); }
   return { p: clamp(p, 0.03, 0.85), parts };
 }
 
-// Tackle ≈ tackle/(tackle+dribble)·1.1, clamp .1–.85
+// Tackle ≈ tackle/(tackle+dribble)·0.95, clamp .1–.85
 export function tackleOdds(tackler, carrier, bonus = 0) {
   const tk = st(tackler).tackle, dr = st(carrier).dribble;
-  return clamp((tk / (tk + dr)) * 1.1 + bonus, 0.1, 0.85);
+  return clamp((tk / (tk + dr)) * 0.95 + bonus, 0.1, 0.85);
 }
 
 // Dribble path (king steps) from a to b; null if blocked.
@@ -107,6 +107,9 @@ export function dribblePath(m, a, b, P = posMap(m)) {
   return path;
 }
 // Defenders adjacent to the path get a lunge at 60% of their tackle odds.
+// No dribble is certain: if a defender is within 3 of the end cell, a heavy
+// touch lets them nip in (keep odds capped at 90%).
+export const DRIBBLE_CAP = 0.9;
 export function dribbleOdds(m, carrier, from, to, o = {}, P = posMap(m)) {
   const path = dribblePath(m, from, to, P);
   if (!path) return null;
@@ -114,7 +117,10 @@ export function dribbleOdds(m, carrier, from, to, o = {}, P = posMap(m)) {
   const lungers = side(m, dSide).filter((u) => weight(u) > 0 && path.some((pc) => cheb(P[u.uid], pc) <= 1));
   let keep = 1;
   const rolls = lungers.map((u) => { const t = tackleOdds(u, carrier) * 0.6 * (o.half ? 0.5 : 1); keep *= 1 - t; return { u, t }; });
-  return { p: keep, rolls, path };
+  const nip = side(m, dSide).filter((u) => char(u).pos !== 'GK' && weight(u) > 0 && cheb(P[u.uid], to) <= 3)
+    .sort((a, b) => dist(P[a.uid], to) - dist(P[b.uid], to))[0] || null;
+  const p = nip ? Math.min(keep, DRIBBLE_CAP) : keep;
+  return { p, rolls, path, nip, touch: keep > 0 ? p / keep : 1 };
 }
 
 // ------------------------------------------------------------------ cards
@@ -122,7 +128,7 @@ export function dribbleOdds(m, carrier, from, to, o = {}, P = posMap(m)) {
 // who: a character card (that player must be the actor / carrier / on the pitch)
 export const CARDS = {
   pass:    { name: 'Short Pass', cost: 1, side: 'atk', kind: 'pass', range: 3, icon: '⚽', text: 'Pass to a teammate within 3.' },
-  switch:  { name: 'Switch Play', cost: 1, side: 'atk', kind: 'pass', range: 7, lofted: true, minCols: 3, icon: '🔀', text: 'Lofted, 3+ columns across. Only close markers cut it. Keeper unsettled.' },
+  switch:  { name: 'Switch Play', cost: 1, side: 'atk', kind: 'pass', range: 11, lofted: true, minCols: 2, icon: '🔀', text: 'Lofted to anyone 2+ columns across. Only close markers cut it. Unsettles the keeper.' },
   through: { name: 'Through Ball', cost: 2, side: 'atk', kind: 'through', icon: '🎯', text: 'A teammate runs up to 2 forward to meet the ball.' },
   dribble: { name: 'Dribble', cost: 1, side: 'atk', kind: 'dribble', range: 2, icon: '💨', text: 'Carry the ball up to 2. Nearby defenders lunge.' },
   overlap: { name: 'Overlap Run', cost: 1, side: 'atk', kind: 'move', range: 3, pos: 'DF', forward: true, icon: '🏃', text: 'A defender bursts up to 3 forward.' },
@@ -154,7 +160,7 @@ export const cardUsable = (m, id) => { const c = CARDS[id]; return !c.who || onP
 export function cardActors(m, id) {
   const c = CARDS[id];
   const h = holder(m);
-  const mine = side(m, 'you');
+  const mine = side(m, 'you').filter((u) => !u.beaten); // lost a tackle: dazed until the turn ends
   if (c.side === 'atk' && m.poss !== 'you') return [];
   if (c.side === 'def' && m.poss !== 'opp') return [];
   if (c.who && !onPitch(m, c.who)) return [];
@@ -203,7 +209,7 @@ export function cardTargets(m, id, actor) {
     }
     case 'dribble': {
       const cells = empties(cell(actor), c.range);
-      return cells.map((cl) => { const o = dribbleOdds(m, actor, cell(actor), cl, { half: c.half }, P); return o && { cell: cl, p: o.p, rolls: o.rolls }; }).filter(Boolean);
+      return cells.map((cl) => { const o = dribbleOdds(m, actor, cell(actor), cl, { half: c.half }, P); return o && { cell: cl, p: o.p, rolls: o.rolls, nip: o.nip, touch: o.touch }; }).filter(Boolean);
     }
     case 'move': {
       const cells = empties(cell(actor), c.range, (cc, rr) => !c.forward || (rr < actor.r && Math.abs(cc - actor.c) <= 1));
@@ -308,7 +314,7 @@ export function planAttack(m) {
   let cur = h, at = V[h.uid];
   for (let step = 0; step < 3; step++) {
     const sp = shotOdds(m, cur, at, {}, V).p;
-    if (sp >= (step === 0 ? 0.3 : 0.2) || (step === 2 && sp > 0.08)) { actions.push({ type: 'shoot', uid: cur.uid }); break; }
+    if (sp >= (step === 0 ? 0.3 : 0.2) || (step === 2 && sp > 0.12)) { actions.push({ type: 'shoot', uid: cur.uid }); break; }
     let best = null, bv = 0.25;
     for (const t of opp) {
       if (t === cur || char(t).pos === 'GK') continue;
@@ -327,7 +333,7 @@ export function planAttack(m) {
       const v = o.p * (1 + dr * 0.3 + shotOdds(m, cur, tc, {}, V).p) - 0.05;
       if (o.p > 0.45 && v > bv) { bv = v; best = { type: 'dribble', uid: cur.uid, to: tc }; }
     }
-    if (!best) { if (sp > 0.06 && step > 0) actions.push({ type: 'shoot', uid: cur.uid }); break; }
+    if (!best) { if (sp > 0.12 && step > 0) actions.push({ type: 'shoot', uid: cur.uid }); break; }
     actions.push(best);
     if (best.type === 'pass') { cur = m.units.find((u) => u.uid === best.to); at = V[cur.uid]; }
     else { at = best.to; V[cur.uid] = at; }
@@ -366,7 +372,7 @@ export function evalAttack(m, plan) {
     } else if (a.type === 'dribble') {
       const o = dribbleOdds(m, u, at, a.to, {}, V);
       if (!o) s = { ...a, from: at, toCell: a.to, p: 0, rolls: [], blockedPath: true };
-      else s = { ...a, from: at, toCell: a.to, p: o.p, rolls: o.rolls };
+      else s = { ...a, from: at, toCell: a.to, p: o.p, rolls: o.rolls, nip: o.nip, touch: o.touch };
       if (o) V[u.uid] = a.to;
     } else {
       const o = shotOdds(m, u, at, {}, V);

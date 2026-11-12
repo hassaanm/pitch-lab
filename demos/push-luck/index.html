@@ -13,9 +13,9 @@
   .pitchwrap canvas { margin: 0 auto; }
   .badge { position: absolute; left: 6px; top: 5px; font-family: var(--font-h); font-size: 12px; background: rgba(0,0,0,.6); padding: 2px 8px; border-radius: 8px; color: #fff; pointer-events: none; }
   .badge b { color: var(--sun); font-weight: 400; }
-  .namedtog { position: absolute; right: 5px; top: 4px; font-family: var(--font-h); font-size: 12px; padding: 3px 8px; min-height: 30px; border-radius: 9px; border: 2px solid var(--ink); background: rgba(255,255,255,.85); color: var(--ink); cursor: pointer; }
+  .namedtog { position: absolute; right: 4px; top: 4px; font-family: var(--font-h); font-size: 13px; padding: 3px 10px; min-height: 40px; border-radius: 9px; border: 2px solid var(--ink); background: rgba(255,255,255,.85); color: var(--ink); cursor: pointer; }
   .namedtog.on { background: var(--sun); }
-  .namedtog .kbd { font-size: 9px; }
+  .namedtog .kbd { font-size: 11px; }
 
   .meters { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; }
   .meter { display: flex; align-items: center; gap: 5px; }
@@ -32,10 +32,17 @@
   .chain .pip { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--ink); background: #39415e; }
   .chain .pip.on { background: var(--sky); }
   .chain .pip.gold { background: var(--sun); box-shadow: 0 0 6px var(--sun); }
-  .chain .cl { font-size: 9.5px; opacity: .7; margin-left: 2px; white-space: nowrap; }
+  .chain .cl { font-size: 11px; opacity: .7; margin-left: 2px; white-space: nowrap; }
 
   .offers { display: flex; gap: 7px; justify-content: center; min-height: 156px; }
-  .offers.busy { opacity: .55; pointer-events: none; }
+  .offers.busy { pointer-events: none; }
+  .offers.busy .gcard { opacity: .45; transform: none; }
+  .offers.busy .gcard.sel { opacity: 1; transform: translateY(-6px); box-shadow: 0 0 0 3px var(--sun), 0 6px 0 var(--ink); }
+  .gcard.opt { animation: dealin .22s ease-out both; }
+  .gcard.opt:nth-child(2) { animation-delay: .04s; } .gcard.opt:nth-child(3) { animation-delay: .08s; } .gcard.opt:nth-child(4) { animation-delay: .12s; }
+  @keyframes dealin { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .offers.busy .gcard.opt { animation: none; }
+  .gcard.opt:active { transform: translateY(-3px) scale(.97); }
   .offers .waiting { align-self: center; font-family: var(--font-h); opacity: .7; }
   .gcard.opt { flex: 1 1 0; max-width: 150px; height: 156px; }
   .gcard.opt .name { padding-left: 24px; font-size: 12px; }
@@ -48,16 +55,18 @@
   .gcard .gain.neg { color: #8a8fa8; }
   .gcard .pr { color: #c2410c; font-family: var(--font-h); font-weight: 400; font-size: 13px; }
   .gcard .pr.cool { color: #0277bd; }
-  .gcard .mods { font-size: 9px; text-align: center; opacity: .75; padding: 0 4px; line-height: 1.15; font-weight: 800; }
-  .gcard.def .text { font-size: 10.5px; flex: 1; font-weight: 800; line-height: 1.15; }
-  .gcard .theirs { font-size: 10px; text-align: center; padding: 0 3px 5px; font-weight: 900; }
+  .gcard .mods { font-size: 11px; text-align: center; opacity: .75; padding: 0 4px; line-height: 1.15; font-weight: 800; }
+  .gcard.def .text { font-size: 11px; flex: 1; font-weight: 800; line-height: 1.15; }
+  .gcard .theirs { font-size: 11px; text-align: center; padding: 0 3px 5px; font-weight: 900; }
   .gcard .theirs .odds { font-size: 12px; padding: 0 5px; border-width: 1.5px; }
-  .gcard .theirs small { display: block; font-size: 8.5px; opacity: .7; }
+  .gcard .theirs small { display: block; font-size: 11px; opacity: .7; }
 
   .actbar { display: flex; gap: 8px; align-items: stretch; }
   .actbar #shoot { flex: 1; min-height: 48px; font-size: 20px; }
   .actbar #shoot .odds { font-size: 15px; }
   .actbar #reroll { min-width: 64px; min-height: 48px; font-size: 16px; }
+  .actbar #shoot.low { filter: saturate(.4) brightness(.9); }
+  .gcard .type { font-size: 11px; letter-spacing: .2px; }
   .ftstats { width: 100%; border-collapse: collapse; font-size: 14px; }
   .ftstats td, .ftstats th { padding: 4px 6px; text-align: center; border-bottom: 1px dashed rgba(27,27,47,.2); }
   .ftstats td:first-child { text-align: left; }
@@ -67,7 +76,7 @@
     .gcard.opt .name { font-size: 11px; }
     .gcard.opt .art { height: 40px; margin: 3px 4px 0; }
     .gcard .riskp { top: 47px; right: 6px; font-size: 11px; }
-    .gcard .type { font-size: 8px; }
+    .gcard .type { font-size: 11px; letter-spacing: .2px; }
   }
 </style>
 </head>

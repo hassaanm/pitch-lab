@@ -48,7 +48,8 @@ export class GridView {
   // Point sprites at the game's unit list. snap = jump without gliding.
   sync(units, holderUid, snap = false) {
     this.units = units;
-    this.holder = holderUid;
+    const handOff = !snap && holderUid !== this.holder;
+    if (snap) this.holder = holderUid;
     const seen = new Set();
     for (const u of units) {
       seen.add(u.uid);
@@ -60,6 +61,7 @@ export class GridView {
     }
     for (const k of [...this.vis.keys()]) if (!seen.has(k)) this.vis.delete(k);
     if (snap && !this.ballFree) this.stick();
+    if (handOff) this.give(holderUid);
   }
 
   tween(dur, fn) { return new Promise((res) => this.tweens.push({ t: 0, dur: Math.max(0.01, dur), fn, res })); }
@@ -68,34 +70,62 @@ export class GridView {
   // glide a unit to a cell
   moveTo(uid, c, r, dur = 0.32) {
     const v = this.vis.get(uid); if (!v) return Promise.resolve();
-    const [x1, y1] = this.feet(c, r); const x0 = v.x, y0 = v.y;
-    v.anim++; v.pose = 'run'; if (Math.abs(x1 - x0) > 2) v.facing = x1 > x0 ? 1 : -1;
+    const [x1, y1] = this.feet(c, r);
     v.c = c; v.r = r; v.tx = x1; v.ty = y1;
+    return this.moveToPx(uid, x1, y1, dur);
+  }
+  // glide a unit to a pixel point (its cell target is unchanged, so once the
+  // tween ends it eases back onto its cell by itself)
+  moveToPx(uid, x1, y1, dur = 0.3, pose = 'run') {
+    const v = this.vis.get(uid); if (!v) return Promise.resolve();
+    const x0 = v.x, y0 = v.y;
+    v.anim++; v.pose = pose; if (Math.abs(x1 - x0) > 2) v.facing = x1 > x0 ? 1 : -1;
     return this.tween(dur, (k) => { v.x = lerp(x0, x1, ease(k)); v.y = lerp(y0, y1, ease(k)); })
-      .then(() => { v.anim--; v.pose = 'idle'; });
+      .then(() => { v.anim--; if (v.pose === pose && pose === 'run') v.pose = 'idle'; });
   }
 
+  // where the ball sits when this unit has it
+  footPt(uid) {
+    const v = this.vis.get(uid);
+    return v ? [v.x + v.facing * this.size * 0.2, v.y + 1] : [this.ball.x, this.ball.y];
+  }
   stick() {
-    const v = this.vis.get(this.holder);
-    if (!v) return;
-    this.ball.x = v.x + v.facing * this.size * 0.2; this.ball.y = v.y + 1; this.ball.h = 0;
+    if (!this.vis.get(this.holder)) return;
+    const [x, y] = this.footPt(this.holder);
+    this.ball.x = x; this.ball.y = y; this.ball.h = 0;
   }
 
-  // ball flight to a point; returns when it lands
+  // ball flight to a fixed point; resolves when it lands
   ballTo(x, y, dur, height = 4) {
     this.ballFree = true;
-    const x0 = this.ball.x, y0 = this.ball.y;
-    return this.tween(dur, (k) => { this.ball.x = lerp(x0, x, k); this.ball.y = lerp(y0, y, k); this.ball.h = Math.sin(k * Math.PI) * height; this.ball.spin += 0.35; });
+    const x0 = this.ball.x, y0 = this.ball.y, h0 = this.ball.h;
+    return this.tween(dur, (k) => { this.ball.x = lerp(x0, x, k); this.ball.y = lerp(y0, y, k); this.ball.h = h0 * (1 - k) + Math.sin(k * Math.PI) * height; this.ball.spin += 0.35; });
   }
-  async passTo(fromUid, c, r, toUid, lofted = false) {
+  // ball flight that homes onto a (possibly moving) unit's feet, so the ball
+  // and the receiver always meet on the same frame; ends with them holding it
+  async ballToUnit(uid, dur, height = 4) {
+    this.ballFree = true;
+    const x0 = this.ball.x, y0 = this.ball.y, h0 = this.ball.h;
+    await this.tween(dur, (k) => {
+      const [x, y] = this.footPt(uid);
+      this.ball.x = lerp(x0, x, k); this.ball.y = lerp(y0, y, k); this.ball.h = h0 * (1 - k) + Math.sin(k * Math.PI) * height; this.ball.spin += 0.35;
+    });
+    this.holder = uid; this.ballFree = false; this.stick();
+  }
+  flightTime(x, y, speed = 420, min = 0.22, max = 0.6) { return clamp(Math.hypot(x - this.ball.x, y - this.ball.y) / speed, min, max); }
+  async passTo(fromUid, toUid, lofted = false, dur) {
     const fv = this.vis.get(fromUid);
-    if (fv) { fv.pose = 'pass'; setTimeout(() => { if (fv.pose === 'pass') fv.pose = 'idle'; }, 300); }
-    const [x, y] = this.feet(c, r);
-    const d = Math.hypot(x - this.ball.x, y - this.ball.y);
-    await this.ballTo(x + 4, y + 1, clamp(d / 420, 0.22, 0.6), lofted ? 34 : 4);
-    this.give(toUid);
+    if (fv) { fv.pose = 'pass'; this.wait(0.3).then(() => { if (fv.pose === 'pass') fv.pose = 'idle'; }); }
+    const [x, y] = this.footPt(toUid);
+    await this.ballToUnit(toUid, dur ?? this.flightTime(x, y), lofted ? 34 : 4);
   }
-  give(uid) { this.holder = uid; this.ballFree = false; this.stick(); }
+  // hand the ball to a unit; if it is not already at their feet it rolls there
+  give(uid, dur) {
+    const [x, y] = this.footPt(uid);
+    const d = Math.hypot(x - this.ball.x, y - this.ball.y);
+    if (d < 6) { this.holder = uid; this.ballFree = false; this.stick(); return Promise.resolve(); }
+    return this.ballToUnit(uid, dur ?? clamp(d / 380, 0.15, 0.9), 2);
+  }
 
   pose(uid, pose, facing) { const v = this.vis.get(uid); if (v) { v.pose = pose; if (facing) v.facing = facing; } }
   label(text, x, y, color = '#fff', life = 1.1) { this.labels.push({ text, x, y, color, t: 0, life }); }
@@ -108,6 +138,7 @@ export class GridView {
     if (!fallback) requestAnimationFrame((t) => this.frame(t));
     if (!this.ctx) return;
     const t = now / 1000;
+    if (window.__slow) dt *= window.__slow; // ?jank=1 testing aid
     if (this.hitstop > 0) { this.hitstop -= dt; dt *= 0.04; }
     for (const tw of [...this.tweens]) {
       tw.t += dt;

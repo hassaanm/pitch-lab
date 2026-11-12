@@ -7,3 +7,20 @@
 - **Undo:** moves and holds undo freely; any dice roll (pass, shot, tackle) locks the turn so far. Phases: kick-off (0', 9 rounds), 60' at 1–1 with Kenji's Needle Pass and Rio's Eagle Strike, 80' at 1–2 at night.
 - **Core decision each turn:** where to put the four players without the ball so the carrier has a pass with fewer red rings on it, without leaving the counter open.
 - **Honest read:** the pass preview is the best part: dragging the aim around and watching odds and rings change makes space visible. Moving five players a turn feels like chess with a ball; most turns the two defenders and keeper just get "hold". Zone of control makes dribbling feel sticky, and the AI's single presser is easy to bait. Worth trying: activate only 2–3 players a turn (Into the Breach style), and let defenders auto-hold shape.
+
+## Polish pass
+
+- **One ball model** (`game.js` `ballPt`/`footPt`/`flyBall`/`settle`): the ball is at a foot, in flight or loose, and every change moves it there. Ownership is set only after the ball arrives. The carried ball swaps feet smoothly when a player turns (`v.face`).
+- **Tackle** (`doTackle`): the carrier turns to face the challenge, the tackler slides until his foot is on the ball, the result shows on that frame, then the ball rolls onto the winner's foot. A failed tackle: the carrier hops it and the tackler stays down.
+- **Interception** (`doPass`): the defender steps into the lane and his foot meets the ball on the line at the same moment. Was: ball flew to his cell, then the pose changed.
+- **Shots** (`doShoot`): a miss is now a physical outcome tied to the odds factors. A defender next to the shooter can block it (slide meets the ball a square out, ball runs loose). A set keeper dives so his gloves and the ball meet (dive sprite lies toward `-facing`), then gathers it. Otherwise wide, and the ball is played back for a goal kick. Was: ball went into the goal mouth, then snapped to the keeper.
+- **Offside** (`offsideCall`): whistle first, then the ball is played to the free-kick taker. Was: a teleport.
+- **Overhit bug**: a failed pass could land on the receiver and count as complete. It now always runs into empty grass.
+- **Goal restart / undo** (`afterGoal`, `undo`, `animateSnap`): players jog back and the ball is carried out of the net. Undo walks players back.
+- **AI** (`logic.js` `carrierPlan`): a boxed-in carrier recycles the ball instead of standing still for whole halves.
+- **UI**: the info box has a fixed height (no reflow), the action bar no longer overflows at 390 px, and the pitch leaves room for the info box and bar at 375×812. During Redrock's turn the info box says what each red player is doing and the latest result. How-to explains the shot and failed-pass outcomes.
+- **Review fixes**: no turn toasts (the turn label pulses instead; the toast covered the bar). Phase tabs and "Play this phase again" fade the scene out and in (`startPhase`, `sceneA`). A won tackle pops the ball to the winner ~170 ms after contact. The info box keeps a one-line "Last: …" result.
+- **Rules (tuned with an AI-vs-AI sim, 1000 matches)**: tackles need a standing start (no move + tackle; `canTackle`), the carrier is not stopped by zone of control. Before this pass a kick-off match averaged 0.2 shots, 0.1 goals (89% 0–0).
+- **Shot formula v2** (`logic.js` `shotOdds`): (shoot/10) · reach(dist) · angle − keeper − 0.12/defender. reach = 0.85/(1+e^(1.3·(d−4.2))), angle = goal mouth seen ÷ 0.9 rad (floor 0.2). Rio: centre spot 25% → 3%, (3,2) 55%, (3,3) 35%, (0,2) 12%. Carrier range: carrying no longer slows you; dribble 8+ gets +1. AI shoots from 18%. Sim (1000 kick-off matches): 4.5 shots, 1.7 goals, 21% 0–0. Shot preview says "Too far" / "Tight angle"; on your turn Redrock's carrier's dribble range is outlined in red.
+- **Auto-hold**: the keeper (ball > 2 away) and defenders (ball > 3 away) hold shape by default, dimmed and not counted on End turn; tap one to move him anyway.
+- **Dev**: `?jank=1` plus `window.__slow = 0.25` slows all animation; the canvas also redraws from the fallback timer when rAF stalls.

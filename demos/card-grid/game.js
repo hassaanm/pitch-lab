@@ -16,9 +16,9 @@ const shell = new Shell({
   title: 'Card Grid',
   pitch: 'Grid tactics where your hand is your playbook. Every card is a move one of your players makes — and Redrock show you their next move first.',
   how: [
-    'Each turn you draw 5 cards and get ⚡3 energy. Tap a card, then a player (if asked), then a highlighted cell. Odds show on every target before you commit.',
-    'Red arrows are Redrock\'s plan. When you attack, a red target ◎ is a press: if your ball carrier ends the turn next to it, they tackle.',
-    'When Redrock have the ball your hand turns defensive: Press, Mark, Block, Offside Trap. Watch their pass and shot odds drop as you move.',
+    'Each turn you draw 5 cards and get ⚡4 energy (⚡5 in the second-half phase). Tap a card, then a player (if asked), then a highlighted cell. Odds show on every target before you commit. An attack hand always holds at least one card that moves the ball.',
+    'Red arrows are Redrock\'s plan. When you attack, a red target ◎ is a press: if your ball carrier ends the turn next to it, they tackle. Dribblers get lunged at by each defender they pass next to, and with a defender within 3 a dribble is never better than 90% (heavy touch).',
+    'When Redrock have the ball your hand turns defensive: Press, Mark, Block, Offside Trap. Watch their pass and shot odds drop as you move. A player who loses a tackle is dazed 💫 until the turn ends: no more cards for them, and they don\'t block passes or shots.',
     'Undo (Z) takes back moves until a dice roll happens. End Turn (E) lets Redrock act.',
     'After every goal and at half-time, add 1 of 3 cards to your deck.',
     'Keys: 1–5 card · ←→ cycle targets · Enter confirm · Esc cancel.',
@@ -26,7 +26,7 @@ const shell = new Shell({
   notice: 'Do cards-as-actions make the grid feel like coaching moves rather than chess? Is the hand restriction fun or frustrating?',
   phases: [
     { id: 'early', label: 'Kickoff', sub: "1' · 0–0" },
-    { id: 'mid', label: 'Second half', sub: "46' · 1–1 · ⚡4" },
+    { id: 'mid', label: 'Second half', sub: "46' · 1–1 · ⚡5" },
     { id: 'clutch', label: 'Clutch', sub: "88' · 1–2 · night" },
   ],
   onPhase: (id) => startPhase(id),
@@ -41,12 +41,12 @@ const KO = {
 const BASE_ATK = ['pass', 'pass', 'pass', 'dribble', 'dribble', 'through', 'shoot', 'shoot', 'run', 'overlap', 'needle', 'eagle'];
 const BASE_DEF = ['press', 'press', 'press', 'mark', 'mark', 'mark', 'block', 'block', 'trap', 'sweep', 'wall', 'thunder'];
 const PHASES = {
-  early: { lineup: LINEUP5.sun, score: [0, 0], turn: 1, maxTurn: 10, half: 5, energy: 3, variant: 'day', poss: 'you', ballIdx: 4,
+  early: { lineup: LINEUP5.sun, score: [0, 0], turn: 1, maxTurn: 10, half: 5, energy: 4, variant: 'day', poss: 'you', ballIdx: 4,
     you: KO.you.you, opp: KO.you.opp, atk: BASE_ATK, def: BASE_DEF },
-  mid: { lineup: ['wak', 'ada', 'tomo', 'kenji', 'rio'], score: [1, 1], turn: 6, maxTurn: 10, half: 5, energy: 4, variant: 'dusk', poss: 'opp', ballIdx: 3,
+  mid: { lineup: ['wak', 'ada', 'tomo', 'kenji', 'rio'], score: [1, 1], turn: 6, maxTurn: 10, half: 5, energy: 5, variant: 'dusk', poss: 'opp', ballIdx: 3,
     you: [[3, 10], [5, 7], [2, 8], [4, 5], [3, 3]], opp: [[3, 0], [2, 3], [5, 4], [3, 6], [2, 7]],
     atk: [...BASE_ATK, 'switch', 'express', 'through', 'pass'], def: [...BASE_DEF, 'press', 'mark'], halftimePick: true },
-  clutch: { lineup: ['wak', 'tomo', 'kenji', 'pip', 'sol'], score: [1, 2], turn: 1, maxTurn: 2, half: 0, labels: ["88'", "90+3'"], energy: 3, variant: 'night', poss: 'you', ballIdx: 2,
+  clutch: { lineup: ['wak', 'tomo', 'kenji', 'pip', 'sol'], score: [1, 2], turn: 1, maxTurn: 2, half: 0, labels: ["88'", "90+3'"], energy: 4, variant: 'night', poss: 'you', ballIdx: 2,
     you: [[3, 10], [2, 7], [3, 5], [5, 4], [1, 3]], opp: [[3, 0], [2, 2], [4, 2], [3, 4], [4, 6]],
     atk: ['pass', 'pass', 'dribble', 'through', 'shoot', 'shoot', 'run', 'needle', 'pinball', 'late', 'switch'], def: ['press', 'press', 'mark', 'mark', 'block', 'trap', 'sweep', 'wall'] },
 };
@@ -109,6 +109,7 @@ function buildScreen() {
   const cv = stage.querySelector('#cv');
   view = new GridView(cv);
   view.under = drawUnder; view.over = drawOver;
+  view.alphaFor = (uid) => (unit(uid)?.beaten ? 0.6 : 1);
   view.glowFor = (uid) => (sel?.actor?.uid === uid ? '#ffffff' : (sel && !sel.actor && sel.actors?.some((a) => a.uid === uid)) ? '#9BE7FF' : null);
   fit();
   view.sync(m.units, m.ball, true);
@@ -132,7 +133,7 @@ function render() {
   if (!m || !view) return;
   shell.setScore({ home: m.score[0], away: m.score[1], clock: clock() });
   const turnsLeft = m.maxTurn - m.turn;
-  stage.querySelector('#badge').textContent = `Turn ${m.turn}/${m.maxTurn}${turnsLeft === 0 ? ' · last' : ''}`;
+  stage.querySelector('#badge').textContent = m.over ? 'Full time' : `Turn ${m.turn}/${m.maxTurn}${turnsLeft === 0 ? ' · last' : ''}`;
   const pb = stage.querySelector('#possb');
   pb.textContent = m.poss === 'you' ? '⚽ Your ball · attack hand' : '🛡️ Their ball · defence hand';
   pb.className = 'possb ' + m.poss;
@@ -169,7 +170,7 @@ function renderHand() {
     const rot = (i - (n - 1) / 2) * 3;
     const isSel = sel?.i === i;
     return cardHTML(id, { idx: i, key: i + 1, best: b.ok ? b.p : null, cls: `${cant ? 'cant' : ''} ${isSel ? 'sel' : ''}`, style: `--rot:${rot}deg` });
-  }).join('') || (m.handSide ? `<span class="muted" style="font-size:13px">Hand empty — end your turn.</span>` : '');
+  }).join('') || (m.handSide && !busy && !m.over ? `<span class="muted" style="font-size:13px">Hand empty — end your turn.</span>` : '');
   el.querySelectorAll('.gcard').forEach((g) => { g.onclick = () => selectCard(+g.dataset.idx); });
 }
 
@@ -177,13 +178,14 @@ function renderHint() {
   const el = stage.querySelector('#hint');
   let t = '';
   if (m.over) t = 'Full time.';
+  else if (!m.plan && !busy) t = 'Kick-off coming…';
   else if (busy) t = m.poss === 'you' ? 'Playing it out…' : 'Redrock are on the move…';
-  else if (sel?.instant) t = `<b>${CARDS[sel.id].name}</b> — tap the card again or press Enter to play. Esc cancels.`;
+  else if (sel?.instant) t = `<b>${CARDS[sel.id].name}</b> — tap the card again to play it.`;
   else if (sel && !sel.actor) t = `<b>${CARDS[sel.id].name}</b> — pick a player (glowing blue).`;
-  else if (sel && sel.nowThreat != null) t = `<b>${CARDS[sel.id].name}</b> with ${nm(sel.actor)} — ⚽ = their goal chance after. Now ${pct(sel.nowThreat)}.`;
-  else if (sel) t = `<b>${CARDS[sel.id].name}</b> with ${nm(sel.actor)} — tap a highlighted cell. Odds shown on each.`;
+  else if (sel && sel.nowThreat != null) t = `<b>${nm(sel.actor)}</b>: ⚽ = their goal chance after (now ${pct(sel.nowThreat)})`;
+  else if (sel) t = `<b>${CARDS[sel.id].name}</b> · ${nm(sel.actor)} — tap a yellow cell.`;
   else if (m.energy <= 0 || !m.hand.some((id) => CARDS[id].cost <= m.energy && R.cardBest(m, id).ok)) t = 'No more plays — <b>End turn</b>.';
-  else t = m.poss === 'you' ? 'Your ball. Play cards to move it, then end the turn away from the red ◎ presses.' : 'Their ball. Read their plan, then Press, Mark or Block to cut the odds.';
+  else t = m.poss === 'you' ? 'Your ball: play cards, end the turn clear of the red ◎.' : 'Their ball: Press, Mark or Block to cut their odds.';
   el.innerHTML = t;
 }
 
@@ -224,7 +226,25 @@ function drawHand(sideKey, n = 5) {
     if (!d.draw.length) break;
     m.hand.push(d.draw.pop());
   }
+  if (sideKey === 'atk') ensureBallCard(d);
   sfx.deal();
+}
+// An attack hand always holds at least one playable card that moves the ball
+// (pass, through ball or dribble), so a turn is never dead on arrival.
+const MOVERS = ['pass', 'through', 'dribble'];
+const playableMover = (id) => MOVERS.includes(CARDS[id].kind) && R.cardBest(m, id).ok;
+function ensureBallCard(d) {
+  if (!m.hand.length || m.hand.some(playableMover)) return;
+  for (const pile of [d.draw, d.discard]) {
+    const j = pile.findIndex(playableMover);
+    if (j < 0) continue;
+    const dead = m.hand.findIndex((id) => !R.cardBest(m, id).ok);
+    const k = dead >= 0 ? dead : m.hand.length - 1;
+    const out = m.hand[k];
+    m.hand[k] = pile[j];
+    pile[j] = out;
+    return;
+  }
 }
 function discardHand() {
   if (m.handSide) m.decks[m.handSide].discard.push(...m.hand);
@@ -234,7 +254,7 @@ function discardHand() {
 function beginTurn() {
   if (m.over) return;
   m.flags = {};
-  for (const u of m.units) { u.block = 0; u.beaten = false; }
+  for (const u of m.units) { if (u.beaten) view.pose(u.uid, 'idle'); u.block = 0; u.beaten = false; }
   m.energy = m.maxEnergy;
   drawHand(m.poss === 'you' ? 'atk' : 'def');
   m.plan = m.poss === 'you' ? R.planDefence(m) : R.planAttack(m);
@@ -307,13 +327,13 @@ async function resolveDefence() {
       if (spot) { u.c = spot[0]; u.r = spot[1]; await view.moveTo(u.uid, u.c, u.r, 0.3); }
       const p = R.tackleOdds(u, h);
       const won = Math.random() < p;
-      await animTackle(u, h, won);
+      await contest(u, h, won, true);
       if (won) {
         log(`🦶 ${nm(u)} presses ${nm(h)} — tackle ${pct(p)} (tackle ${R.st(u).tackle} vs dribble ${R.st(h).dribble}). <b>Ball lost.</b>`, 'bad');
-        m.ball = u.uid; m.poss = 'opp'; view.give(u.uid);
+        m.ball = u.uid; m.poss = 'opp';
         return;
       }
-      log(`${nm(h)} rides ${nm(u)}'s tackle (${pct(p)} to win it). Still your ball.`, 'good');
+      log(`${nm(h)} rides ${nm(u)}'s tackle (${pct(p)} to win it). Still your ball — ${nm(u)} is dazed 💫.`, 'good');
       u.beaten = true;
     } else {
       if (!R.unitAt(m, pr.cell[0], pr.cell[1]) && R.cheb(R.cell(u), pr.cell) <= 3) { u.c = pr.cell[0]; u.r = pr.cell[1]; await view.moveTo(u.uid, u.c, u.r, 0.3); }
@@ -335,49 +355,51 @@ async function resolveAttack() {
     if (s.type === 'pass') {
       const t = unit(s.to);
       if (s.offside && Math.random() < s.offside) {
-        await view.passTo(u.uid, t.c, t.r, t.uid);
+        tag('offside');
+        await view.passTo(u.uid, t.uid);
         sfx.whistle(1);
         view.labelAt(t.c, t.r, 'OFFSIDE!', '#FFD23F');
+        view.pose(t.uid, 'sad');
         const df = nearestOf('you', R.cell(t), true);
         log(`🚩 Offside! ${nm(t)} was behind your line. Free kick to ${nm(df)}.`, 'good');
+        await view.wait(0.45);
+        view.pose(t.uid, 'idle'); view.pose(df.uid, 'ready');
+        await view.give(df.uid, 0.55); // ball is rolled to the free-kick taker
+        view.pose(df.uid, 'idle');
         m.ball = df.uid; m.poss = 'you';
-        await view.wait(0.5); view.give(df.uid);
         return;
       }
       const ok = Math.random() < s.raw;
       if (ok) {
-        await view.passTo(u.uid, t.c, t.r, t.uid);
+        tag('pass');
+        await view.passTo(u.uid, t.uid);
         m.ball = t.uid;
         log(`${nm(u)} → ${nm(t)} (${pct(s.raw)}) completes.`, 'them');
       } else {
-        const cut = s.blockers[0]?.u || nearestOf('you', R.cell(t));
-        await view.passTo(u.uid, cut.c, cut.r, cut.uid);
-        sfx.thud(); view.hitstop = 0.12;
-        view.labelAt(cut.c, cut.r, 'CUT OUT!', '#9BE7FF');
+        const cut = s.blockers[0]?.u || nearestToLine('you', R.cell(u), R.cell(t));
+        await cutOut(u, view.footPt(t.uid), cut, false, 'CUT OUT!', '#9BE7FF');
         log(`${nm(u)} → ${nm(t)} had ${pct(s.raw)}${s.blockers.length ? ` with ${s.blockers.map((b) => nm(b.u)).join(' & ')} in the lane` : ''}. <b>${nm(cut)} intercepts!</b>`, 'good');
         m.ball = cut.uid; m.poss = 'you';
         return;
       }
     } else if (s.type === 'dribble') {
-      const occ = R.unitAt(m, s.to[0], s.to[1]);
-      if (s.blockedPath || occ) {
-        const d = occ && occ.side === 'you' ? occ : nearestOf('you', R.cell(u));
-        await animTackle(d, u, true);
-        log(`${nm(u)} tries to dribble but ${nm(d)} is standing in the way. <b>Won it!</b>`, 'good');
-        m.ball = d.uid; m.poss = 'you'; view.give(d.uid);
+      const path = R.dribblePath(m, R.cell(u), s.to);
+      if (!path) {
+        // someone is standing in the lane: a Sunbird there steps in and takes it
+        const wall = firstOnLine(R.cell(u), s.to);
+        if (!wall || wall.side !== 'you') { log(`${nm(u)}'s dribble lane is closed — Redrock hold the ball.`, 'good'); return; }
+        tag('dribble-block');
+        await contest(wall, u, true);
+        log(`${nm(u)} tries to dribble but ${nm(wall)} is standing in the way. <b>Won it!</b>`, 'good');
+        m.ball = wall.uid; m.poss = 'you';
         return;
       }
-      const path = R.dribblePath(m, R.cell(u), s.to);
-      for (const pc of path) { u.c = pc[0]; u.r = pc[1]; await view.moveTo(u.uid, u.c, u.r, 0.2); }
-      for (const roll of s.rolls) {
-        const won = Math.random() < roll.t;
-        if (won) {
-          await animTackle(roll.u, u, true);
-          log(`${nm(roll.u)} lunges at ${nm(u)} (${pct(roll.t)}) — <b>ball won!</b>`, 'good');
-          m.ball = roll.u.uid; m.poss = 'you';
-          return;
-        }
-        view.labelAt(roll.u.c, roll.u.r, 'missed', '#ccc', 0.7);
+      tag('dribble');
+      const stop = await runDribble(u, path, s.rolls, s.nip, s.touch);
+      if (stop) {
+        log(stop.touch ? `${nm(u)} takes a heavy touch — <b>${nm(stop.u)} nips in!</b> (dribble was ${pct(s.p)})` : `${nm(stop.u)} lunges at ${nm(u)} (${pct(stop.t)}) — <b>ball won!</b>`, 'good');
+        m.ball = stop.u.uid; m.poss = 'you';
+        return;
       }
       log(`${nm(u)} dribbles through (${pct(s.p)}).`, 'them');
     } else {
@@ -399,6 +421,25 @@ function adjacentFree(center, from) {
 }
 function nearestOf(s, at, outfield = false) {
   return R.side(m, s).filter((u) => !outfield || R.char(u).pos !== 'GK').sort((a, b) => R.dist(R.cell(a), at) - R.dist(R.cell(b), at))[0];
+}
+// The outfielder of side s closest to the pass line from→to (the one who reads it).
+function nearestToLine(s, from, to) {
+  const segD = (p) => {
+    const dx = to[0] - from[0], dy = to[1] - from[1], L = dx * dx + dy * dy || 1;
+    const k = R.clamp(((p[0] - from[0]) * dx + (p[1] - from[1]) * dy) / L, 0.2, 1);
+    return Math.hypot(from[0] + k * dx - p[0], from[1] + k * dy - p[1]);
+  };
+  return R.side(m, s).filter((u) => R.char(u).pos !== 'GK' && !u.beaten).sort((a, b) => segD(R.cell(a)) - segD(R.cell(b)))[0];
+}
+// First unit standing on the king-step line from a toward b.
+function firstOnLine(a, b) {
+  let [c, r] = a;
+  while (c !== b[0] || r !== b[1]) {
+    c += Math.sign(b[0] - c); r += Math.sign(b[1] - r);
+    const u = R.unitAt(m, c, r);
+    if (u) return u;
+  }
+  return null;
 }
 
 // ------------------------------------------------------------------ input
@@ -426,6 +467,8 @@ function whyNot(id) {
   const h = R.holder(m);
   if (c.who && !m.units.some((u) => u.cid === c.who && u.side === 'you')) return `${byId[c.who].name} isn't on the pitch.`;
   if (c.who && ['pass', 'dribble', 'shoot'].includes(c.kind)) return `${byId[c.who].name} needs the ball (${h ? nm(h) : 'nobody'} has it).`;
+  const dazed = R.side(m, 'you').filter((u) => u.beaten).map(nm);
+  if (dazed.length && ['press', 'move', 'block'].includes(c.kind)) return `${dazed.join(' & ')} ${dazed.length > 1 ? 'are' : 'is'} dazed 💫 after a lost tackle — nobody else can play this.`;
   if (c.kind === 'press') return 'Nobody is within reach of the ball.';
   return 'Nobody can play this right now.';
 }
@@ -521,6 +564,7 @@ async function playSel(t) {
   const actor = sel.actor;
   const c = CARDS[id];
   const random = isRandom(c, t);
+  flyCard(i, actor, t);
   if (random) undoStack = []; else undoStack.push(snapshot());
   m.energy -= c.cost;
   m.hand.splice(i, 1);
@@ -536,7 +580,23 @@ async function playSel(t) {
   busy = false;
   render();
 }
-const isRandom = (c, t) => ['pass', 'through', 'shoot', 'press'].includes(c.kind) || (c.kind === 'dribble' && t.rolls?.length > 0);
+// The played card lifts out of the hand and flies to where it takes effect.
+function flyCard(i, actor, t) {
+  const el = stage.querySelector(`#hand .gcard[data-idx="${i}"]`);
+  const cv = stage.querySelector('#cv');
+  if (!el || !cv) return;
+  const r0 = el.getBoundingClientRect(), rc = cv.getBoundingClientRect();
+  const at = t?.cell && t.cell[1] >= 0 && t.cell[1] < R.ROWS ? t.cell : actor ? R.cell(actor) : [3, 5];
+  const [px, py] = view.center(...at);
+  const ghost = el.cloneNode(true);
+  ghost.classList.remove('sel', 'cant');
+  Object.assign(ghost.style, { position: 'fixed', left: r0.left + 'px', top: r0.top + 'px', width: r0.width + 'px', height: r0.height + 'px', margin: 0, zIndex: 50, pointerEvents: 'none', transition: 'transform .38s cubic-bezier(.3,.7,.4,1), opacity .38s ease-in', transform: 'none' });
+  document.body.appendChild(ghost);
+  const dx = rc.left + px - (r0.left + r0.width / 2), dy = rc.top + py - (r0.top + r0.height / 2);
+  requestAnimationFrame(() => requestAnimationFrame(() => { ghost.style.transform = `translate(${dx}px, ${dy}px) scale(.3)`; ghost.style.opacity = '0'; }));
+  setTimeout(() => ghost.remove(), 450);
+}
+const isRandom = (c, t) => ['pass', 'through', 'shoot', 'press'].includes(c.kind) || (c.kind === 'dribble' && (t.rolls?.length > 0 || t.touch < 1));
 
 async function resolveCard(id, a, t) {
   const c = CARDS[id];
@@ -564,17 +624,17 @@ async function resolveCard(id, a, t) {
       const to = t.unit;
       const won = Math.random() < t.p;
       const why = c.needle ? 'needle — ignores defenders' : t.blockers.length ? `${t.blockers.map((b) => nm(b.u)).join(' & ')} ${c.lofted ? 'marking' : 'in the lane'}` : 'clear lane';
+      if (c.needle) await shell.cutIn(byId.kenji, 'NEEDLE PASS');
       if (won) {
-        if (c.needle) shell.cutIn(byId.kenji, 'NEEDLE PASS');
-        await view.passTo(h.uid, to.c, to.r, to.uid, c.lofted);
+        tag('pass');
+        await view.passTo(h.uid, to.uid, c.lofted);
         m.ball = to.uid;
         m.flags.keeperUnset = !!c.lofted;
         log(`${nm(h)} → ${nm(to)}: ${c.name} ${Ptag(t.p)} (${why}). ✓`, 'good');
         return;
       }
-      const cut = t.blockers[0]?.u || nearestOf('opp', R.cell(to));
-      await view.passTo(h.uid, cut.c, cut.r, cut.uid, c.lofted);
-      sfx.thud(); view.hitstop = 0.12; view.labelAt(cut.c, cut.r, 'INTERCEPTED', '#FF8A80');
+      const cut = t.blockers[0]?.u || nearestToLine('opp', R.cell(h), R.cell(to));
+      await cutOut(h, view.footPt(to.uid), cut, c.lofted, 'INTERCEPTED', '#FF8A80');
       log(`${nm(h)} → ${nm(to)} had ${Ptag(t.p)} (${why}). <b>${nm(cut)} intercepts.</b>`, 'bad');
       m.ball = cut.uid; m.poss = 'opp';
       return 'turnover';
@@ -583,37 +643,33 @@ async function resolveCard(id, a, t) {
       const h = R.holder(m);
       const won = Math.random() < t.p;
       a.c = t.cell[0]; a.r = t.cell[1];
-      const run = view.moveTo(a.uid, a.c, a.r, 0.5);
-      await view.wait(0.12);
+      tag('through');
+      const run = view.moveTo(a.uid, a.c, a.r, 0.55);
+      await view.wait(0.15);
       if (won) {
-        await view.passTo(h.uid, a.c, a.r, a.uid);
+        await view.passTo(h.uid, a.uid, false, 0.4); // homes onto the runner: they meet as the run ends
         await run;
         m.ball = a.uid; m.flags.keeperUnset = a.r <= 3;
         log(`🎯 Through ball ${nm(h)} → ${nm(a)} (${Ptag(t.p)}). ✓${a.r <= 3 ? ' Keeper caught off his line!' : ''}`, 'good');
         return;
       }
-      const cut = t.blockers[0]?.u || nearestOf('opp', t.cell);
-      await view.passTo(h.uid, cut.c, cut.r, cut.uid);
-      await run;
-      sfx.thud(); view.labelAt(cut.c, cut.r, 'READ IT', '#FF8A80');
+      const cut = t.blockers[0]?.u || nearestToLine('opp', R.cell(h), t.cell);
+      await Promise.all([cutOut(h, view.feet(...t.cell), cut, false, 'READ IT', '#FF8A80'), run]);
       log(`🎯 Through ball to ${nm(a)} had ${Ptag(t.p)}. <b>${nm(cut)} reads it.</b>`, 'bad');
       m.ball = cut.uid; m.poss = 'opp';
       return 'turnover';
     }
     case 'dribble': {
-      if (c.who === 'pip') shell.cutIn(byId.pip, 'PINBALL RUN');
+      if (c.who === 'pip') await shell.cutIn(byId.pip, 'PINBALL RUN');
       const path = R.dribblePath(m, R.cell(a), t.cell);
       if (!path) return;
-      for (const pc of path) { a.c = pc[0]; a.r = pc[1]; await view.moveTo(a.uid, a.c, a.r, 0.2); }
       m.flags.keeperUnset = false;
-      for (const roll of t.rolls) {
-        if (Math.random() < roll.t) {
-          await animTackle(roll.u, a, true);
-          log(`💨 ${nm(a)} dribbles; ${nm(roll.u)} lunges (${Ptag(roll.t)}) — <b>tackled.</b> Keep-ball odds were ${Ptag(t.p)}.`, 'bad');
-          m.ball = roll.u.uid; m.poss = 'opp';
-          return 'turnover';
-        }
-        view.labelAt(roll.u.c, roll.u.r, 'skinned!', '#FFD23F', 0.8); sfx.whoosh();
+      tag('dribble');
+      const stop = await runDribble(a, path, t.rolls, t.nip, t.touch);
+      if (stop) {
+        log(stop.touch ? `💨 ${nm(a)} takes a heavy touch — <b>${nm(stop.u)} nips in.</b> Keep-ball odds were ${Ptag(t.p)}.` : `💨 ${nm(a)} dribbles; ${nm(stop.u)} lunges (${Ptag(stop.t)}) — <b>tackled.</b> Keep-ball odds were ${Ptag(t.p)}.`, 'bad');
+        m.ball = stop.u.uid; m.poss = 'opp';
+        return 'turnover';
       }
       log(`💨 ${nm(a)} dribbles to safety${t.rolls.length ? ` past ${t.rolls.map((r) => nm(r.u)).join(' & ')} (${Ptag(t.p)})` : ''}.`, 'good');
       return;
@@ -628,34 +684,120 @@ async function resolveCard(id, a, t) {
       a.c = t.cell[0]; a.r = t.cell[1];
       await view.moveTo(a.uid, a.c, a.r, 0.3);
       const won = Math.random() < t.p;
-      await animTackle(a, h, won);
+      await contest(a, h, won, true);
       if (won) {
-        log(`🦶 ${nm(a)} presses ${nm(h)}: tackle ${Ptag(t.p)} (tackle ${R.st(a).tackle} vs dribble ${R.st(h).dribble}). <b>Ball won!</b>`, 'good');
-        m.ball = a.uid; m.poss = 'you'; view.give(a.uid);
+        log(`🦶 ${c.name}: ${nm(a)} presses ${nm(h)}: tackle ${Ptag(t.p)} (tackle ${R.st(a).tackle} vs dribble ${R.st(h).dribble}). <b>Ball won!</b>`, 'good');
+        m.ball = a.uid; m.poss = 'you';
         shell.toast('Ball won! Your attack starts next turn.');
         return 'turnover';
       }
       a.beaten = true;
-      log(`🦶 ${nm(a)} presses ${nm(h)} (${Ptag(t.p)}) — skinned, and out of the play this turn.`, 'bad');
+      log(`🦶 ${c.name}: ${nm(a)} presses ${nm(h)} (${Ptag(t.p)}) — skinned. ${nm(a)} is dazed 💫 and can't act again this turn.`, 'bad');
       return;
     }
   }
 }
 
 // ------------------------------------------------------------------ juice
-async function animTackle(tk, victim, won) {
-  view.pose(tk.uid, 'slide', victim.c >= tk.c ? 1 : -1);
+const tag = (s) => { window.__jankCtx = s; };
+
+// A tackle. The tackler closes in and slides at the carrier's feet; only at
+// that contact frame do the sound, label and outcome happen. If won, the ball
+// pops off the carrier's foot to the tackler.
+async function contest(tk, victim, won, daze = false) {
+  tag('tackle');
+  const tv = view.vis.get(tk.uid);
+  const [bx, by] = view.footPt(victim.uid);
+  const dir = bx >= tv.x ? 1 : -1;
+  const reach = view.size * 0.42;
+  // anticipation: run in until one stride away, then slide the rest
+  const far = Math.hypot(bx - tv.x, by - tv.y);
+  if (far > view.cw * 1.3) {
+    const k = 1 - (view.cw * 0.9) / far;
+    await view.moveToPx(tk.uid, tv.x + (bx - tv.x) * k, tv.y + (by - tv.y) * k, R.clamp(far / 320, 0.2, 0.5));
+  }
+  await view.moveToPx(tk.uid, bx - dir * reach, by - 1, 0.2, 'slide');
+  tv.facing = dir;
+  // contact
   sfx.thud();
-  view.hitstop = 0.16;
+  view.hitstop = 0.14;
   shell.shake(stage.querySelector('.pitchwrap'));
   view.labelAt(victim.c, victim.r, won ? 'TACKLE!' : 'BEATEN!', won ? '#FF8A3D' : '#FFD23F');
-  if (won) { view.pose(victim.uid, 'sad'); view.give(tk.uid); }
-  else { view.pose(victim.uid, 'celebrate'); sfx.whoosh(); }
-  await view.wait(0.5);
-  view.pose(tk.uid, 'idle'); view.pose(victim.uid, 'idle');
+  if (won) {
+    view.pose(victim.uid, 'sad');
+    await view.give(tk.uid, 0.16);
+  } else {
+    view.pose(victim.uid, 'celebrate'); sfx.whoosh();
+  }
+  await view.wait(0.4);
+  view.pose(tk.uid, !won && daze ? 'sad' : 'idle'); view.pose(victim.uid, 'idle'); // a beaten presser stays dazed
+  await view.wait(0.2); // tackler eases back onto their cell
 }
 
+// An interception: the cutter reads the pass and steps into the line; ball
+// and cutter reach the same point on the same frame.
+async function cutOut(passer, toPt, cutter, lofted, text, color) {
+  tag('intercept');
+  const [ax, ay] = view.footPt(passer.uid);
+  const [bx, by] = toPt;
+  const cv = view.vis.get(cutter.uid);
+  const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1;
+  let k = ((cv.x - ax) * dx + (cv.y - ay) * dy) / L;
+  k = lofted ? R.clamp(k, 0.8, 0.95) : R.clamp(k, 0.3, 0.92);
+  const mx = ax + dx * k, my = ay + dy * k;
+  const f = Math.abs(mx - cv.x) > 2 ? Math.sign(mx - cv.x) : cv.facing;
+  const T = view.flightTime(mx, my, 400, 0.3, 0.6);
+  const pv = view.vis.get(passer.uid);
+  if (pv) { pv.pose = 'pass'; view.wait(0.3).then(() => { if (pv.pose === 'pass') pv.pose = 'idle'; }); }
+  sfx.pass();
+  await Promise.all([
+    view.ballTo(mx, my, T, lofted ? 30 : 4),
+    view.moveToPx(cutter.uid, mx - f * view.size * 0.2, my - 1, T),
+  ]);
+  cv.facing = f;
+  view.pose(cutter.uid, lofted ? 'header' : 'kick');
+  await view.give(cutter.uid);
+  sfx.thud(); view.hitstop = 0.12;
+  view.label(text, mx, my - view.size * 0.6, color);
+  await view.wait(0.35);
+  view.pose(cutter.uid, 'idle');
+  await view.wait(0.2);
+}
+
+// Carry the ball step by step. A defender lunges when the carrier passes
+// next to them (each rolls once, at the odds shown). Returns the winning roll.
+async function runDribble(u, path, rolls, nip = null, touch = 1) {
+  const pending = [...rolls];
+  let prev = R.cell(u);
+  for (const pc of path) {
+    u.c = pc[0]; u.r = pc[1];
+    await view.moveTo(u.uid, u.c, u.r, 0.24);
+    for (const roll of pending.filter((x) => R.cheb(R.cell(x.u), pc) <= 1)) {
+      pending.splice(pending.indexOf(roll), 1);
+      const won = Math.random() < roll.t;
+      await contest(roll.u, u, won);
+      if (won) return roll;
+    }
+    prev = pc;
+  }
+  // heavy touch: the ball runs ahead and the nearest defender nips in to meet it
+  if (nip && Math.random() > touch) {
+    const [fx, fy] = view.footPt(u.uid);
+    const last = path[path.length - 1], before = path.length > 1 ? path[path.length - 2] : prev;
+    const dx = Math.sign(last[0] - before[0]) || 0, dy = Math.sign(last[1] - before[1]) || 0;
+    const ahead = [fx + dx * view.cw * 0.9, fy + dy * view.ch * 0.9];
+    await cutOut(u, ahead, nip, false, 'HEAVY TOUCH', u.side === 'you' ? '#FF8A80' : '#9BE7FF');
+    return { u: nip, t: 1 - touch, touch: true };
+  }
+  return null;
+}
+
+// Keeper dive geometry: in the 'dive' pose the body lies toward -facing, so
+// the hands end up about this far from the feet.
+const HANDS = { x: 0.92, y: 0.42 };
+
 async function shoot(u, p, parts = []) {
+  tag('shot');
   const sideAtk = u.side;
   const top = sideAtk === 'you';
   const roll = Math.random();
@@ -665,19 +807,36 @@ async function shoot(u, p, parts = []) {
   const [gx, gy] = view.pitch.goalMouth(top);
   const gw = view.pitch.goalW, nd = view.pitch.netDepth;
   const aim = (Math.random() < 0.5 ? -1 : 1) * (0.18 + Math.random() * 0.22);
-  let tx = gx + aim * gw, ty = gy + (top ? -nd * 0.6 : nd * 0.6);
-  if (result === 'miss') { tx = gx + Math.sign(aim) * gw * (0.62 + Math.random() * 0.3); ty = gy + (top ? -14 : 14); }
-  const diveDir = Math.sign(tx - gv.x) || 1;
-  const gx0 = gv.x;
+  const gx0 = gv.x, gy0 = gv.y;
+  const dir = Math.sign(gx + aim * gw - gx0) || 1;
+  const S = view.size;
+  // where the ball ends up, and where the keeper's feet end up
+  let ex, ey, kx, ky;
+  if (result === 'save') {
+    kx = gx0 + dir * gw * 0.12; ky = gy0;
+    ex = kx + dir * S * HANDS.x; ey = ky + 1;                      // under the gloves (lifted by h)
+  } else if (result === 'goal') {
+    ex = gx + aim * gw; ey = gy + (top ? -nd * 0.6 : nd * 0.6);   // in the net
+    kx = gx0 + dir * gw * 0.1; ky = gy0;                           // dives, but short
+  } else {
+    ex = gx + dir * gw * (0.62 + Math.random() * 0.3); ey = gy + (top ? -14 : 14);
+    kx = gx0 + dir * 6; ky = gy0;                                  // shuffles, watches it go wide
+  }
+  const T = 0.5;
   view.pose(u.uid, 'kick');
   sfx.kick();
   gv.anim++; gv.pose = 'ready';
-  const ex = result === 'save' ? (gx0 + tx) / 2 + diveDir * 6 : tx, ey = result === 'save' ? gy + (top ? 6 : -6) : ty;
   const x0 = view.ball.x, y0 = view.ball.y;
   view.ballFree = true;
-  await view.tween(0.45, (k) => {
-    view.ball.x = x0 + (ex - x0) * k; view.ball.y = y0 + (ey - y0) * k; view.ball.h = Math.sin(k * Math.PI) * (result === 'miss' ? 20 : 9); view.ball.spin += 0.6;
-    if (k > 0.25) { gv.pose = 'dive'; gv.facing = diveDir; gv.x = gx0 + diveDir * gw * 0.3 * Math.min(1, (k - 0.25) / 0.6); }
+  const diveFrom = result === 'goal' ? 0.45 : 0.3;
+  await view.tween(T, (k) => {
+    view.ball.x = x0 + (ex - x0) * k; view.ball.y = y0 + (ey - y0) * k; view.ball.spin += 0.6;
+    view.ball.h = Math.sin(k * Math.PI) * (result === 'miss' ? 20 : 9) + (result === 'save' ? k * S * HANDS.y : 0);
+    if (result !== 'miss' && k > diveFrom) {
+      const q = (k - diveFrom) / (1 - diveFrom);
+      gv.pose = 'dive'; gv.facing = -dir;
+      gv.x = gx0 + (kx - gx0) * q; gv.y = gy0 + (ky - gy0) * q;
+    } else if (result === 'miss') gv.x = gx0 + (kx - gx0) * k;
   });
   view.pose(u.uid, 'idle');
   const who = nm(u);
@@ -688,15 +847,23 @@ async function shoot(u, p, parts = []) {
     return 'goal';
   }
   if (result === 'save') {
-    sfx.save(); view.label('SAVED!', gv.x, gv.y - view.size, '#9BE7FF');
-    await view.ballTo(ex + diveDir * 22, ey + (top ? 18 : -18), 0.3, 8);
-  } else { sfx.ooh(); view.label('WIDE!', tx, ty + (top ? 30 : -30), '#fff'); await view.wait(0.5); }
+    // contact: ball in the gloves
+    sfx.save(); view.hitstop = 0.12;
+    view.label('SAVED!', ex, ey - S * 0.9, '#9BE7FF');
+    await view.wait(0.45);
+    gv.anim--; gv.pose = 'idle';           // gets up, gathers it, walks back to the cell
+    await view.give(gk.uid, 0.25);
+  } else {
+    sfx.ooh(); view.label('WIDE!', ex, ey + (top ? 30 : -30), '#fff');
+    await view.wait(0.6);
+    gv.anim--; gv.pose = 'idle';
+    view.labelAt(gk.c, gk.r, 'Goal kick', '#fff', 0.9);
+    await view.give(gk.uid, 0.6);          // ball comes back for the goal kick
+  }
   log(`${top ? '🥅' : '😮'} ${who} shoots (${why}) — ${result === 'save' ? `${nm(gk)} saves` : 'wide'}.`, top ? 'bad' : 'good');
-  await view.wait(0.35);
-  gv.anim--; gv.pose = 'idle';
+  await view.wait(0.25);
   m.ball = gk.uid; m.poss = R.other(sideAtk);
   m.flags.keeperUnset = false;
-  view.give(gk.uid);
   return result;
 }
 
@@ -715,22 +882,30 @@ async function goalScored(sideAtk, u, why) {
   shell.setScore({ home: m.score[0], away: m.score[1], clock: clock() });
   await view.wait(1.8);
   for (const x of m.units) view.pose(x.uid, 'idle');
-  kickoff(R.other(sideAtk));
+  await kickoff(R.other(sideAtk));
   if (m.turn < m.maxTurn) await offerReward(top ? 'Goal! Pick a card' : 'Respond: pick a card');
 }
 
-function kickoff(s) {
+// Everyone jogs back to kick-off shape while the ball is fetched to the taker.
+async function kickoff(s) {
+  tag('kickoff');
   const F = KO[s];
   m.units.forEach((u) => { const i = +u.uid.slice(1); const p = F[u.side][i]; u.c = p[0]; u.r = p[1]; });
   m.poss = s;
   m.ball = (s === 'you' ? 'y' : 'o') + '4';
-  view.ballFree = false;
-  view.sync(m.units, m.ball);
-  view.give(m.ball);
+  await Promise.all([...m.units.map((u) => view.moveTo(u.uid, u.c, u.r, 1.0)), view.give(m.ball, 1.0)]);
 }
 
 // ------------------------------------------------------------------ rewards + full time
-function offerReward(title) {
+// One sheet at a time: wait for the How-to (or any other sheet) to close.
+async function sheetsClear() {
+  while (document.querySelector('.sheet-wrap')) await new Promise((r) => setTimeout(r, 150));
+}
+
+async function offerReward(title) {
+  const tok = phaseToken;
+  await sheetsClear();
+  if (tok !== phaseToken) return; // phase changed while we waited
   const pool = shuffle(R.REWARDS.filter((id) => R.cardUsable(m, id)));
   const picks = pool.slice(0, 3);
   // make sure both attack and defence cards are on offer
@@ -855,6 +1030,9 @@ function drawOver(ctx, t) {
     roundRect(ctx, v.x - w / 2, y - 6, w, 12, 6); ctx.fill();
     ctx.fillStyle = '#fff'; ctx.fillText(name, v.x, y + 0.5);
   }
+  // dazed players (lost a tackle this turn)
+  ctx.font = `${Math.round(Math.max(12, view.size * 0.34))}px system-ui`;
+  for (const u of m.units) if (u.beaten) { const v = view.vis.get(u.uid); if (v) ctx.fillText('💫', v.x, v.y - view.size * 1.02 + Math.sin(t * 4) * 2); }
   ctx.restore();
   const C = (cl) => (cl[1] < 0 ? view.pitch.goalMouth(true) : cl[1] >= R.ROWS ? view.pitch.goalMouth(false) : view.center(...cl));
   const H = R.holder(m);
@@ -922,4 +1100,4 @@ function drawOver(ctx, t) {
 
 
 // debug handle for playtesting in the console
-window.cardGrid = { get m() { return m; }, R };
+window.cardGrid = { get m() { return m; }, get view() { return view; }, R };

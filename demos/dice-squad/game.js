@@ -1,6 +1,6 @@
 // Dice Squad: Dicey Dungeons football. Roll dice, slot them into your
 // players' abilities, chip down each zone's defensive wall, then shoot.
-import { Shell, oddsClass } from '../../shared/shell.js';
+import { Shell, oddsClass, clamp } from '../../shared/shell.js';
 import { portrait } from '../../shared/art.js';
 import { sfx } from '../../shared/sfx.js';
 import { byId } from '../../shared/cast.js';
@@ -16,9 +16,10 @@ const MATCHES = [
   { name: 'Redrock United', sub: 'Cup Final', variant: 'night', kBase: 3, hans: true },
 ];
 const THREATS = [
-  { key: 'viper', atk: 9, shot: 2 },
-  { key: 'kofi', atk: 11, shot: 1 },
-  { key: 'zed', atk: 8, shot: 2 },
+  // Tuned by simulation (see NOTES.md): one tackle is never enough to win it.
+  { key: 'viper', atk: 12, shot: 3 },
+  { key: 'kofi', atk: 14, shot: 2 },
+  { key: 'zed', atk: 11, shot: 3 },
 ];
 
 // Abilities. test(v) = which dice fit. zones = where it works (attack only).
@@ -32,12 +33,12 @@ const AB = {
   drive: { name: 'Drive', need: '3–5', test: (v) => v >= 3 && v <= 5, kind: 'dmg', dmg: (v) => v + 1, text: 'Carry it: deal die +1.' },
   dribble: { name: 'Dribble', need: 'EVEN', test: (v) => v % 2 === 0, kind: 'dmg', dmg: (v) => v + 2, text: 'Even dice only. Deal die +2.' },
   layoff: { name: 'Lay-off', need: '4+', test: (v) => v >= 4, zones: [2, 3], kind: 'dmg', dmg: (v) => v, text: 'Attack or Box. Deal the die.' },
-  shoot: { name: 'Shoot', need: '5–6', test: (v) => v >= 5, zones: [3], kind: 'shot', text: 'Box only. Shot power = die +2 vs their keeper.' },
+  shoot: { name: 'Shoot', need: '5–6', test: (v) => v >= 5, zones: [3], kind: 'shot', text: 'Box only. Shot power = die +2 vs their keeper. A shot ends your attack.' },
   // defence
-  save: { name: 'Save', need: 'ANY', test: () => true, kind: 'save', text: 'Keeper value = die +3. Beat their shot power.' },
+  save: { name: 'Save', need: 'ANY', test: () => true, kind: 'save', text: 'Keeper value = die +2. Beat their shot power.' },
   tackle: { name: 'Tackle', need: 'ANY', test: () => true, kind: 'stop', amt: (v) => v, text: 'Take the die off their attack.' },
   track: { name: 'Track Back', need: 'EVEN', test: (v) => v % 2 === 0, kind: 'stop', amt: (v) => v, text: 'Even dice. Take the die off their attack.' },
-  nick: { name: 'Nick It', need: '6', test: (v) => v === 6, kind: 'stop', amt: () => 99, text: 'A 6 steals the ball outright.' },
+  nick: { name: 'Nick It', need: '6', test: (v) => v === 6, kind: 'stop', amt: () => 7, text: 'A 6 takes 7 off their attack.' },
   press: { name: 'Press', need: '5–6', test: (v) => v >= 5, kind: 'stop', amt: () => 3, text: 'Take 3 off their attack.' },
 };
 const SQUAD = [
@@ -64,12 +65,13 @@ const shell = new Shell({
   title: 'Dice Squad',
   pitch: 'Dicey Dungeons on a football pitch. Roll dice, slot them into your players\' abilities, and chip through four defensive walls to the goal.',
   how: [
-    'Each turn you roll 4 dice. Tap a die, then tap a socket on a player card. Each socket works once per turn and only takes dice that fit (1–3, EVEN, 6…).',
-    'Damage chips the wall of the zone you are in: Defence → Midfield → Attack → Box. Break a wall to move up — leftover dice keep working in the new zone.',
-    'The ⏱ pressure clock gives you 3 turns per line. If it runs out, you lose the ball.',
-    'In the Box, Rio can Shoot with a 5–6. The socket shows your goal chance before you commit.',
-    'When they attack, slot dice to tackle (shrink their attack to 0 to win it back) and give Wak a die to save. The meter shows their chance to score.',
-    'Watch out: Spider Lu steals your highest die in the Attack zone; Iron Hans locks a die in the Box.',
+    'Each turn you roll 4 dice. Tap a die, then tap a glowing socket on a player card. Each socket works once per turn and only takes dice that fit (1–3, EVEN, 6…).',
+    'Every die you slot plays out on the pitch: a pass or a run into the wall. Damage chips the wall of the zone you are in: Defence → Midfield → Attack → Box. Break a wall to move up and leftover dice keep working, but you break at most one line per turn: the next wall holds at 1 until next turn.',
+    'The ⏱ pressure clock gives you 3 turns per line. If it runs out, their nearest defender tackles you and they attack.',
+    'In the Box, Rio can Shoot with a 5–6. The socket shows your goal chance before you commit. Their keeper\'s 6 always saves, and a shot ends your attack (leftover dice are lost).',
+    'When they attack, slot dice to tackle (shrink their attack to 0 and your tackler wins the ball for a counter from Midfield) and give Wak a die to save (die +2). Press Defend to let them shoot. The meter shows their chance to score.',
+    'Watch out: Spider Lu steals your highest die in the Attack zone, and Iron Hans locks a die in the Box (from the League match on). They strike at the start of each turn there, and the moment you arrive in their zone.',
+    'After each match pick one upgrade. A drawn Final goes to sudden-death penalties.',
     'Keys: 1–5 pick a die · Q W E R T… sockets in card order · Enter ends the turn · G lucky reroll.',
   ],
   notice: 'Does slotting dice feel like building play, or like a puzzle wearing a kit?',
@@ -87,11 +89,15 @@ let m = null;     // current match state
 let view = null;
 let busy = false;
 let dieSeq = 1;
+let gen = 0;   // bumps on every new match; stale async flows stop at their next await
+const stale = (g) => g !== gen ? new Promise(() => {}) : null;
 const has = (u) => run?.up.has(u);
+const JANK = new URLSearchParams(location.search).has('jank');
 
 // ================================================================ phases
 function startPhase(id) {
   busy = false;
+  document.querySelectorAll('.die.flying').forEach((e) => e.remove());
   if (id === 'early') {
     run = { match: 0, up: new Set(), results: [] };
     startMatch({});
@@ -121,7 +127,7 @@ function startMatch(o) {
   };
   for (const z in o.wallNow || {}) m.wall[z] = o.wallNow[z];
   for (let z = 0; z < m.zone; z++) m.wall[z] = 0;
-  stage.innerHTML = `<div class="ds">
+  stage.innerHTML = `<div class="ds${has('die5') ? ' six' : ''}">
     <div class="status"><span class="mname">${M.sub} · vs <b>${M.name}</b></span><span class="clock" id="clock"></span></div>
     <div class="pitchwrap"><canvas id="pitch"></canvas><div class="modebadge" id="modebadge"></div></div>
     <div class="ztrack" id="ztrack"></div>
@@ -130,9 +136,11 @@ function startMatch(o) {
     <div class="cards" id="cards"></div>
     ${run.up.size ? `<div class="ups">${[...run.up].map((u) => `<span class="chip" title="${UPGRADES[u].text}">${UPGRADES[u].icon} ${UPGRADES[u].name}</span>`).join('')}</div>` : ''}
   </div>`;
+  gen++;
   if (view) view.running = false;
   view = new DiceView(stage.querySelector('#pitch'));
   fitPitch(M.variant);
+  if (JANK) window.__ds = { view, get m() { return m; } };
   window.onresize = () => fitPitch(M.variant);
   const red = (id, zone, du) => ({ c: byId[id], key: id, zone, du });
   view.setTeams(SQUAD.map((p) => ({ c: byId[p.id], key: p.id })),
@@ -163,50 +171,76 @@ function dieHTML(d, o = {}) {
 }
 
 async function rollDice(n) {
-  busy = true;
+  const g = gen;
   m.dice = Array.from({ length: n }, () => newDie());
   m.sel = null;
   const box = stage.querySelector('#dice');
   const t0 = performance.now();
+  box.innerHTML = m.dice.map((d, i) => dieHTML(d, { face: 1 + Math.floor(Math.random() * 6), cls: 'rolling', attr: `style="animation-delay:${i * 40}ms"` })).join('');
+  const els = [...box.querySelectorAll('.die')];
   await new Promise((res) => {
     const tick = () => {
-      box.innerHTML = m.dice.map((d, i) => dieHTML(d, { face: 1 + Math.floor(Math.random() * 6), cls: 'rolling', attr: `style="animation-delay:${i * 40}ms"` })).join('');
+      // Faces flicker inside the same elements so the tumble animation plays once.
+      els.forEach((el, i) => { const f = performance.now() - t0 > 440 ? m.dice[i].v : 1 + Math.floor(Math.random() * 6); el.querySelectorAll('.pips i').forEach((p, j) => p.classList.toggle('on', PIPS[f].includes(j))); });
       sfx.tick();
       if (performance.now() - t0 < 520) setTimeout(tick, 75); else res();
     };
     tick();
   });
+  if (stale(g)) return stale(g);
   sfx.thud();
-  busy = false;
 }
+
+// A rival lunges at your carrier and takes one die. The pitch label and the
+// tray die change on the contact frame. Fires at turn start and when the
+// attack enters his zone mid-turn.
+async function tamper(kind, entering = false) {
+  const isLu = kind === 'lu';
+  const pool = m.dice.filter((d) => !d.stolen && !d.locked);
+  if (!pool.length) return;
+  const d = isLu ? [...pool].sort((a, b) => b.v - a.v)[0] : pool[Math.floor(Math.random() * pool.length)];
+  const rival = view.find(isLu ? 'lu' : 'hans');
+  const c = view.carrier;
+  // Reach: he runs at the carrier and stops a stride short, then lunges.
+  if (c) {
+    const dir = Math.sign(rival.x - c.x) || 1;
+    await view.runTo(rival, c.x + dir * view.size * 0.6, c.y + 2, 0.3);
+    rival.facing = -dir;
+  }
+  rival.pose = 'tackle';
+  if (c && c.side === 'you') c.pose = 'sad';
+  view.hitstop = 0.08;
+  if (isLu) d.stolen = true; else d.locked = true;
+  for (const l of view.labels) l.t = Math.max(l.t, l.life * 0.8);   // older callouts fade so this one reads alone
+  view.label(isLu ? `🕸 STOLE A ${d.v}` : `⛓ LOCKED A ${d.v}`, rival.x, rival.y - view.size, isLu ? '#CE93D8' : '#9BE7FF');
+  shell.log(isLu ? `Spider Lu's web${entering ? ' as you arrive' : ''}: he steals your highest die (${d.v}) this turn.` : `Iron Hans${entering ? ' meets you in the Box and' : ''} locks one of your dice (${d.v}). It can't be used this turn.`, 'bad', `${minute()}'`);
+  isLu ? sfx.whoosh() : sfx.thud();
+  renderAll();
+  stage.querySelector(`[data-die="${d.id}"]`)?.classList.add('hitnow');
+  await view.wait(0.35);
+  await view.getUp(rival);
+  if (c && c.pose === 'sad') c.pose = 'idle';
+  view.release(rival);                     // he jogs back into the wall
+}
+
+const rivals = async (entering = false) => {
+  if (m.zone === 2) await tamper('lu', entering);
+  if (m.zone === 3 && MATCHES[run.match].hans) await tamper('hans', entering);
+};
 
 // ================================================================ turns
 async function startAttackTurn(first = false) {
   if (m.turn > TURNS) return fullTime();
-  m.mode = 'attack'; m.used = {}; m.luckyUsed = false; m.engineUses = 0;
+  setBusy(true);
+  m.mode = 'attack'; m.used = {}; m.luckyUsed = false; m.engineUses = 0; m.broke = false;
   view.setZone(m.zone, 'attack');
   setScore();
   renderAll(true);
   await rollDice(4 + (has('die5') ? 1 : 0));
-  // Rivals tamper with the roll.
-  if (m.zone === 2) {
-    const hi = [...m.dice].sort((a, b) => b.v - a.v)[0];
-    hi.stolen = true;
-    const lu = view.find('lu');
-    view.label(`🕸 STOLE A ${hi.v}`, lu.x, lu.y - view.size, '#CE93D8');
-    shell.log(`Spider Lu's web: he steals your highest die (${hi.v}) this turn.`, 'bad', `${minute()}'`);
-    sfx.whoosh();
-  }
-  if (m.zone === 3 && MATCHES[run.match].hans) {
-    const pool = m.dice.filter((d) => !d.stolen);
-    const d = pool[Math.floor(Math.random() * pool.length)];
-    d.locked = true;
-    const h = view.find('hans');
-    view.label(`⛓ LOCKED ${d.v}`, h.x, h.y - view.size, '#9BE7FF');
-    shell.log(`Iron Hans locks one of your dice (${d.v}). It can't be used this turn.`, 'bad', `${minute()}'`);
-    sfx.thud();
-  }
+  renderAll();
   if (!first || m.turn === 1) shell.log(`Turn ${m.turn}: you roll ${m.dice.map((d) => d.v).join(' · ')} in the ${ZONES[m.zone]} zone (wall ${m.wall[m.zone]}/${m.wallMax[m.zone]}).`, '', `${minute()}'`);
+  await rivals();
+  setBusy(false);
   renderAll();
 }
 
@@ -220,12 +254,7 @@ async function endTurn() {
   m.clock--;
   if (left) shell.log(`${left} unused ${left > 1 ? 'dice' : 'die'} wasted.`, 'info', `${minute()}'`);
   if (m.turn > TURNS) return fullTime();
-  if (m.clock <= 0) {
-    shell.log(`⏱ Pressure clock hit zero in the ${ZONES[m.zone]} zone. Turnover!`, 'bad', `${minute()}'`);
-    shell.banner('TURNOVER', 'They win it back', '#FF8A80');
-    sfx.bad();
-    return startDefend();
-  }
+  if (m.clock <= 0) return turnover();
   startAttackTurn();
 }
 
@@ -238,7 +267,7 @@ function sockets() {
 function sockState(s, d) {
   const A = AB[s.ab];
   if (m.used[s.key] && !(s.ab === 'engine' && has('engine2') && m.engineUses < 2 && m.used[s.key].n < 2)) return { ok: false, why: 'Used this turn' };
-  if (m.mode === 'attack' && A.zones && !A.zones.includes(m.zone)) return { ok: false, why: A.zones.length === 1 ? `${ZONES[A.zones[0]]} only` : 'Attack/Box only' };
+  if (m.mode === 'attack' && A.zones && !A.zones.includes(m.zone)) return { ok: false, why: A.zones.length === 1 ? `${ZONES[A.zones[0]]} only` : 'Attack or Box only' };
   if (!d) return { ok: true };
   if (d.locked) return { ok: false, why: 'Locked by Hans' };
   if (d.stolen) return { ok: false, why: 'Stolen by Lu' };
@@ -247,8 +276,11 @@ function sockState(s, d) {
 }
 function preview(s, d) {
   const A = AB[s.ab];
-  if (A.kind === 'dmg') { const n = A.dmg(d.v); return { tag: `−${n}`, text: `${A.name}: −${n} to the ${ZONES[m.zone]} wall (${m.wall[m.zone]} → ${Math.max(0, m.wall[m.zone] - n)})${m.wall[m.zone] - n <= 0 && m.zone < 3 ? ' — breaks the line!' : ''}` }; }
-  if (A.kind === 'shot') { const p = shotP(d.v); return { tag: `${Math.round(p * 100)}%`, odds: p, text: `Shoot: power ${shotPower(d.v)} vs keeper ${keeperBase()}+d6 → <b>${Math.round(p * 100)}% goal</b>${m.wall[3] > 0 ? ' (box wall still up: keeper +2)' : ' (wall down!)'}` }; }
+  if (A.kind === 'dmg') {
+    const n = A.dmg(d.v), after = wallAfter(n), held = after > 0 && m.wall[m.zone] - n <= 0;
+    return { tag: held ? `−${n}→1` : `−${n}`, held, text: `${A.name}: −${n} to the ${ZONES[m.zone]} wall (${m.wall[m.zone]} → ${after})${held ? ' — holds at 1: one line per turn' : after === 0 && m.wall[m.zone] > 0 ? (m.zone < 3 ? ' — breaks the line!' : ' — opens the box!') : ''}` };
+  }
+  if (A.kind === 'shot') { const p = shotP(d.v); return { tag: `${Math.round(p * 100)}%`, odds: p, text: `Shoot: power ${shotPower(d.v)} vs keeper ${keeperBase()}+d6 (a 6 always saves) → <b>${Math.round(p * 100)}% goal</b>${m.wall[3] > 0 ? ' (box wall up: keeper +2)' : ''}. Ends your attack.` }; }
   if (A.kind === 'recycle') return { tag: '↻', text: 'Recycle: reroll your other free dice.' };
   if (A.kind === 'split') return { tag: `${Math.floor(d.v / 2)}+${Math.ceil(d.v / 2)}`, text: `Split ${d.v} into ${Math.floor(d.v / 2)} and ${Math.ceil(d.v / 2)}.` };
   if (A.kind === 'plus') return { tag: `→${d.v + 1}`, text: `Engine: ${d.v} becomes ${d.v + 1}.` };
@@ -257,10 +289,16 @@ function preview(s, d) {
   return { tag: '', text: '' };
 }
 
+// True when a damage socket this die fits would be stopped by the one-line rule.
+const holdsAny = (d) => m.mode === 'attack' && sockets().some((s) => AB[s.ab].kind === 'dmg' && sockState(s, d).ok && preview(s, d).held);
+// One line per turn: once a wall has broken this turn, the next one holds at 1.
+const wallAfter = (n) => (m.wall[m.zone] <= 0 ? 0 : Math.max(m.broke ? 1 : 0, m.wall[m.zone] - n));
 const shotPower = (v) => v + 2 + (has('eagle') ? 1 : 0);
 const keeperBase = () => MATCHES[run.match].kBase + (m.wall[3] > 0 ? 2 : 0);
-const shotP = (v) => { let n = 0; for (let k = 1; k <= 6; k++) if (shotPower(v) > k + keeperBase()) n++; return n / 6; };
-const saveVal = (v) => v + 3 + (has('gloves') ? 2 : 0);
+// The keeper's 6 always saves, so no shot is better than 5 in 6.
+const beats = (v, roll) => roll < 6 && shotPower(v) > keeperBase() + roll;
+const shotP = (v) => { let n = 0; for (let k = 1; k <= 6; k++) if (beats(v, k)) n++; return n / 6; };
+const saveVal = (v) => v + 2 + (has('gloves') ? 2 : 0);
 const theirPower = (atk) => m.threat.shot + Math.ceil(Math.max(0, atk) / 3);
 function theirGoalP(atk, keeper) {
   if (atk <= 0) return 0;
@@ -279,6 +317,10 @@ function selectDie(id) {
   renderAll();
 }
 
+// Abilities where the card's player plays the ball forward (contact = the pass
+// arrives); the rest carry it (contact = the run ends in the defender's face).
+const PASSERS = { longkick: true, short: true, vision: true, layoff: true };
+
 async function place(sockKey, dieId = m.sel) {
   if (busy) return;
   const s = sockets().find((x) => x.key === sockKey);
@@ -287,7 +329,7 @@ async function place(sockKey, dieId = m.sel) {
   if (!d) { shell.toast('Pick a die first'); return; }
   const st = sockState(s, d);
   if (!st.ok) { sfx.bad(); shell.toast(st.why); const el = stage.querySelector(`[data-sock="${sockKey}"]`); el?.classList.remove('nope'); void el?.offsetWidth; el?.classList.add('nope'); return; }
-  busy = true;
+  setBusy(true);
   await snap(d.id, sockKey);
   const A = AB[s.ab];
   const who = byId[s.p].name;
@@ -295,65 +337,105 @@ async function place(sockKey, dieId = m.sel) {
   m.sel = null;
   const mark = (v) => { const u = m.used[sockKey]; m.used[sockKey] = { v, n: (u?.n || 0) + 1 }; };
   if (A.kind !== 'plus') m.dice = m.dice.filter((x) => x.id !== d.id);
+  mark(d.v);
   if (A.kind === 'dmg') {
-    mark(d.v);
     const n = A.dmg(d.v);
     const before = m.wall[m.zone];
-    m.wall[m.zone] = Math.max(0, before - n);
-    if (view.carrier !== actor) view.passTo(actor, 0.35, s.ab === 'longkick' || s.ab === 'vision'); else sfx.pass();
-    sfx.pass();
-    view.label(`−${n}`, actor.x, actor.y - view.size, '#FFD23F');
-    popZone(m.zone, `−${n}`);
-    shell.log(`${who} · ${A.name} (${d.v}): −${n} to the ${ZONES[m.zone]} wall → ${m.wall[m.zone]}/${m.wallMax[m.zone]}.`, 'good', `${minute()}'`);
-    renderAll();
-    await view.wait(0.35);
+    renderAll();                         // die sits in the socket; the wall has not moved yet
+    await playBall(actor, s.ab, (x, y) => {
+      m.wall[m.zone] = wallAfter(n);
+      view.label(m.wall[m.zone] === 1 && m.broke && before - n <= 0 ? `−${n} · HOLDS` : `−${n}`, x, y - view.size, '#FFD23F');
+      popZone(m.zone, `−${n}`);
+      sfx.thud();
+      shell.log(`${who} · ${A.name} (${d.v}): −${n} to the ${ZONES[m.zone]} wall → ${m.wall[m.zone]}/${m.wallMax[m.zone]}.`, 'good', `${minute()}'`);
+      renderAll();
+    });
     if (m.wall[m.zone] === 0 && before > 0) await breakLine();
   } else if (A.kind === 'recycle') {
-    mark(d.v);
     const others = free();
     shell.log(`${who} · Recycle (${d.v}): reroll ${others.length} ${others.length === 1 ? 'die' : 'dice'}.`, '', `${minute()}'`);
-    const keep = m.dice;
-    const fresh = keep.map((x) => (!x.locked && !x.stolen ? newDie() : x));
-    m.dice = fresh;
+    m.dice = m.dice.map((x) => (!x.locked && !x.stolen ? newDie() : x));
     renderAll();
-    stage.querySelectorAll('#dice .die').forEach((el) => el.classList.add('rolling'));
+    stage.querySelectorAll('#dice .die:not(.locked):not(.stolen)').forEach((el) => el.classList.add('rolling'));
     sfx.deal();
-    await view.wait(0.4);
+    await view.wait(0.45);
   } else if (A.kind === 'split') {
-    mark(d.v);
     const a = newDie(Math.floor(d.v / 2)), b = newDie(Math.ceil(d.v / 2));
     m.dice.push(a, b);
     shell.log(`${who} · Split: ${d.v} → ${a.v} + ${b.v}.`, '', `${minute()}'`);
     sfx.whoosh();
+    renderAll();
+    for (const x of [a, b]) stage.querySelector(`[data-die="${x.id}"]`)?.classList.add('rolling');
+    await view.wait(0.4);
   } else if (A.kind === 'plus') {
-    mark(d.v);
     m.engineUses++;
     d.v += 1;
     shell.log(`${who} · Engine: die bumped to ${d.v}.`, '', `${minute()}'`);
     sfx.good();
     m.sel = d.id;
+    renderAll();
+    stage.querySelector(`[data-die="${d.id}"]`)?.classList.add('rolling');
+    await view.wait(0.3);
   } else if (A.kind === 'shot') {
-    mark(d.v);
     renderAll();
     await shoot(d.v, actor);
-    busy = false;
     return;
   } else if (A.kind === 'stop') {
-    mark(d.v);
     const n = A.amt(d.v);
-    m.threat.atk = Math.max(0, m.threat.atk - n);
-    view.label(n >= 99 ? 'NICKED!' : `−${n}`, actor.x, actor.y - view.size, '#9BE7FF');
-    sfx.thud();
-    shell.log(`${who} · ${A.name} (${d.v}): their attack → ${m.threat.atk}.`, 'good', `${minute()}'`);
-    if (m.threat.atk <= 0) { renderAll(); await wonBall(actor); busy = false; return; }
+    const left = Math.max(0, m.threat.atk - n);
+    renderAll();
+    const att = view.find(m.threat.key);
+    await view.tackle(actor, att, { win: left <= 0, onContact: () => {
+      m.threat.atk = left;
+      view.label(n >= 99 ? 'NICKED!' : left <= 0 ? 'WON IT!' : `−${n}`, att.x, att.y - view.size, '#9BE7FF');
+      sfx.thud();
+      shell.log(`${who} · ${A.name} (${d.v}): their attack → ${m.threat.atk}.`, 'good', `${minute()}'`);
+      renderAll();
+    } });
+    if (m.threat.atk <= 0) return wonBall(actor);
   } else if (A.kind === 'save') {
-    mark(d.v);
     m.threat.keeper = saveVal(d.v);
+    const wak = view.find('wak');
+    wak.pose = 'ready';
+    view.label(`SAVE ${m.threat.keeper}`, wak.x, wak.y - view.size, '#9BE7FF');
     sfx.save();
     shell.log(`Wak sets himself: save value ${m.threat.keeper}.`, '', `${minute()}'`);
+    renderAll();
+    await view.wait(0.3);
   }
-  busy = false;
-  renderAll();
+  setBusy(false);
+}
+
+// The ball physically does the ability. onContact(x, y) fires on the frame it lands.
+async function playBall(actor, ab, onContact) {
+  const fwd = (a) => view.actors.filter((b) => b.side === 'you' && b !== a && b.c.pos !== 'GK').sort((p, q) => p.y - q.y)[0];
+  if (PASSERS[ab]) {
+    // The card's player gets the ball, then plays it forward.
+    if (view.carrier !== actor) await view.passTo(actor);
+    sfx.pass();
+    const to = fwd(actor);
+    await view.passTo(to, ab === 'longkick' || ab === 'vision');
+    view.flinch(view.wallMan(to.x, to.y));
+    onContact(to.x, to.y);
+  } else {
+    // Carry: the player takes the ball and drives at the nearest wall defender.
+    if (view.carrier !== actor) await view.passTo(actor);
+    const man = view.wallMan(actor.x, actor.y);
+    const tx = man ? lerp(actor.x, man.x, 0.6) : actor.x, ty = man ? man.y + view.size * 0.45 : actor.y - view.size;
+    await view.runTo(actor, tx, ty, 0.32);
+    actor.pose = 'kick';
+    view.flinch(man);
+    onContact(actor.x, actor.y);
+    await view.wait(0.12);
+    view.release(actor);
+  }
+  await view.wait(0.25);
+}
+const lerp = (a, b, k) => a + (b - a) * k;
+
+function setBusy(on) {
+  busy = on;
+  stage.querySelector('.ds')?.classList.toggle('busy', on);
 }
 
 // Fly a copy of the die into the socket.
@@ -370,120 +452,197 @@ async function snap(dieId, sockKey) {
   const anim = ghost.animate([{ transform: 'translate(0,0) rotate(0) scale(1)' },
     { transform: `translate(${(b.left - a.left) / 2}px, ${(b.top - a.top) / 2 - 30}px) rotate(200deg) scale(1.1)`, offset: 0.6 },
     { transform: `translate(${b.left - a.left}px, ${b.top - a.top}px) rotate(360deg) scale(${b.width / a.width})` }], { duration: 260, easing: 'ease-in' });
-  await anim.finished.catch(() => {});
+  const g = gen;
+  // Never let the turn hang on a paused animation timeline.
+  await Promise.race([anim.finished.catch(() => {}), new Promise((r) => setTimeout(r, 320))]);
   ghost.remove();
+  if (stale(g)) return stale(g);
   sfx.thud();
 }
 
 async function breakLine() {
   const z = m.zone;
+  m.broke = true;
   if (z < 3) {
-    m.zone++;
-    m.clock = 3;
-    view.setZone(m.zone, 'attack');
-    const c = view.carrier;
-    view.label('LINE BROKEN!', view.w / 2, view.pitch.toPx(0, ZONE_V[z])[1], '#FFD23F', 1.2, true);
+    view.label('LINE BROKEN!', view.w / 2, view.pitch.toPx(0, ZONE_V[z])[1] - view.size, '#FFD23F', 1.2, true);
     sfx.whoosh(); sfx.roar(0.5);
     shell.shake(stage.querySelector('.pitchwrap'));
-    shell.log(`<b>${ZONES[z]} line broken!</b> Into the ${ZONES[m.zone]} zone. Clock reset to 3. Leftover dice still count.`, 'good', `${minute()}'`);
-    if (c) { await view.wait(0.2); view.passTo(view.find(m.zone >= 2 ? 'rio' : 'kenji'), 0.45, true); }
+    await view.wait(0.25);
+    m.zone++;
+    m.clock = 3;
+    view.setZone(m.zone, 'attack');           // the team surges up; beaten defenders fade
+    shell.log(`<b>${ZONES[z]} line broken!</b> Into the ${ZONES[m.zone]} zone. Clock reset to 3. Leftover dice still count, but the next wall holds at 1 this turn.`, 'good', `${minute()}'`);
+    renderAll();
+    if (view.carrier) await view.passTo(view.find(m.zone >= 2 ? 'rio' : 'kenji'), true);
+    await rivals(true);
   } else {
-    view.label('BOX OPEN!', view.w / 2, view.pitch.toPx(0, 0.12)[1], '#FFD23F', 1.2, true);
+    view.label('BOX OPEN!', view.w / 2, view.pitch.toPx(0, 0.12)[1] + view.size, '#FFD23F', 1.2, true);
     sfx.roar(0.6);
     shell.log('Box wall down: their keeper loses his +2. Shoot!', 'good', `${minute()}'`);
+    renderAll();
   }
-  renderAll();
   await view.wait(0.3);
 }
 
 async function shoot(v, actor) {
   const p = shotP(v), power = shotPower(v), roll = 1 + Math.floor(Math.random() * 6), kv = keeperBase() + roll;
-  const goal = power > kv;
-  await view.passTo(actor, 0.2);
-  shell.log(`Rio shoots: power ${power} vs keeper ${keeperBase()}+${roll} = ${kv} (${Math.round(p * 100)}% shot).`, '', `${minute()}'`);
+  const goal = beats(v, roll);
+  const pct = Math.round(p * 100);
+  if (view.carrier !== actor) await view.passTo(actor);
+  await view.wait(0.12);
   const result = goal ? 'goal' : (Math.random() < 0.6 ? 'save' : 'miss');
-  await view.shotAt(true, result);
-  if (goal) {
-    m.score[0]++;
-    setScore();
-    sfx.goal();
-    shell.banner('GOAL!', `Rio · ${m.score[0]}–${m.score[1]}`);
-    shell.confetti(); shell.flash('#FFD23F'); shell.shake();
-    view.celebrate('you');
-    shell.log(`<b>GOAL! Rio.</b> ${m.score[0]}–${m.score[1]}`, 'goal', `${minute()}'`);
-    await view.wait(1.2);
-    view.celebrate('you', false);
-  } else {
-    sfx.save();
-    view.label(result === 'save' ? 'SAVED!' : 'WIDE!', view.w / 2, 40, '#9BE7FF');
-    shell.log(`${result === 'save' ? 'Oskar saves' : 'Just wide'}. Their goal kick.`, 'bad', `${minute()}'`);
-    await view.wait(0.5);
-  }
+  sfx.kick();
+  const gk = view.keeper('opp');
+  await view.shotAt(true, result, () => {
+    shell.log(`Rio shoots (${pct}%): power ${power} vs keeper ${keeperBase()}+${roll} = ${kv}${roll === 6 ? ' (a 6 always saves)' : ''}.`, '', `${minute()}'`);
+    if (goal) {
+      m.score[0]++;
+      setScore();
+      sfx.goal();
+      shell.banner('GOAL!', `Rio · ${pct}% shot · ${m.score[0]}–${m.score[1]}`);
+      shell.confetti(); shell.flash('#FFD23F'); shell.shake();
+      view.celebrate('you');
+      shell.log(`<b>GOAL! Rio.</b> ${m.score[0]}–${m.score[1]}`, 'goal', `${minute()}'`);
+    } else {
+      result === 'save' ? sfx.save() : sfx.ooh();
+      view.label(result === 'save' ? `SAVED · ${pct}%` : `WIDE · ${pct}%`, view.ball.x, view.ball.y + view.size, '#9BE7FF');
+      shell.log(`${result === 'save' ? 'Oskar saves' : 'Just wide'} (keeper ${kv} vs power ${power}).`, 'bad', `${minute()}'`);
+    }
+  });
   m.turn++;
-  if (m.turn > TURNS) return fullTime();
-  startDefend();
+  if (goal) {
+    await view.wait(1.0);
+    view.celebrate('you', false);
+    if (m.turn > TURNS) return fullTime();
+    // Their kick-off: cover the reset.
+    return startDefend(() => view.cut(() => { prepThreat(); view.give(view.find(m.threat.key)); }));
+  }
+  await view.wait(0.3);
+  if (m.turn > TURNS) { view.recover(gk); return fullTime(); }
+  if (result === 'save') {
+    // Oskar has it in his hands: he gets up and throws it out to their attacker.
+    view.recover(gk);
+    return startDefend(async () => { prepThreat(); await view.wait(0.35); await view.passTo(view.find(m.threat.key), true); });
+  }
+  // Wide: goal kick. The ball is out of play, so cover the reset.
+  return startDefend(async () => {
+    await view.cut(() => { view.recover(gk); view.give(gk); });
+    prepThreat();
+    await view.wait(0.2);
+    await view.passTo(view.find(m.threat.key), true);
+  });
 }
 
 // ================================================================ defending
-async function startDefend() {
-  m.mode = 'defend'; m.used = {}; m.engineUses = 0; m.luckyUsed = false;
+function pickThreat() {
   const base = THREATS[Math.floor(Math.random() * THREATS.length)];
   m.threat = { ...base, atk: base.atk + run.match, shot: base.shot + (run.match >= 2 ? 1 : 0), keeper: 1 };
   m.threat.start = m.threat.atk;
-  const c = byId[m.threat.key];
+}
+// Switch the pitch into their attacking shape (players jog there).
+function prepThreat() {
+  if (!m.threat) pickThreat();
   view.threatKey = m.threat.key; view.threatV = 0.5; view.threatU = 0.5;
   view.setZone(0, 'defend');
-  view.give(view.find(m.threat.key));
+}
+
+// They have the ball. `bringBall` is the motion that got it to their attacker.
+async function startDefend(bringBall) {
+  setBusy(true);
+  m.mode = 'defend'; m.used = {}; m.engineUses = 0; m.luckyUsed = false; m.sel = null; m.dice = [];
+  m.threat = null;
+  pickThreat();
+  renderAll(true);
+  await bringBall?.();
+  const c = byId[m.threat.key];
   setScore();
   shell.log(`${c.name} attacks: Attack ${m.threat.atk}, shot ${m.threat.shot} + attack÷3 + d6. Tackle it to 0 or trust Wak.`, 'them', `${minute()}'`);
   renderAll(true);
   await rollDice(4 + (has('die5') ? 1 : 0));
+  setBusy(false);
   renderAll();
 }
 
+// Pressure clock ran out: the nearest wall defender tackles your carrier,
+// then plays it to their attacker.
+async function turnover() {
+  setBusy(true);
+  m.dice = []; m.sel = null; renderAll();
+  const carrier = view.carrier;
+  const tackler = view.wallMan(carrier.x, carrier.y) || view.find('viper');
+  shell.log(`⏱ Pressure clock hit zero in the ${ZONES[m.zone]} zone.`, 'bad', `${minute()}'`);
+  await view.tackle(tackler, carrier, { win: true, onContact: () => {
+    sfx.bad();
+    view.label('TURNOVER', tackler.x, tackler.y - view.size, '#FF8A80');
+    shell.banner('TURNOVER', `${byId[tackler.key].name} wins it`, '#FF8A80');
+    shell.log(`${byId[tackler.key].name} wins the ball. Turnover!`, 'bad', `${minute()}'`);
+  } });
+  return startDefend(async () => {
+    prepThreat();
+    await view.wait(0.2);
+    await view.passTo(view.find(m.threat.key), true);
+  });
+}
+
 async function wonBall(actor) {
-  busy = true;
-  view.give(actor);
+  setBusy(true);
   sfx.good();
-  shell.banner('WON IT!', 'Counter from midfield');
-  shell.log(`Ball won! You counter from the Midfield zone.`, 'good', `${minute()}'`);
-  await view.wait(0.8);
+  shell.banner('WON IT!', `${byId[actor.key].name} · counter from midfield`);
+  shell.log(`Ball won by ${byId[actor.key].name}! You counter from the Midfield zone.`, 'good', `${minute()}'`);
   m.turn++;
   m.zone = 1; m.clock = 3; m.wall = [0, ...m.wallMax.slice(1)];
-  busy = false;
+  view.threatKey = null;
+  view.setZone(1, 'attack');   // everyone jogs into the counter shape; the tackler carries it
+  await view.wait(0.7);
   startAttackTurn();
 }
 
 async function resolveDefence() {
-  busy = true;
+  setBusy(true);
+  m.sel = null; renderAll();
   const T = m.threat, c = byId[T.key];
   const p = theirGoalP(T.atk, T.keeper);
   const roll = 1 + Math.floor(Math.random() * 6), power = theirPower(T.atk) + roll;
   const goal = power > T.keeper;
-  shell.log(`${c.name} shoots: power ${theirPower(T.atk)}+${roll} = ${power} vs Wak ${T.keeper} (${Math.round(p * 100)}% shot).`, 'them', `${minute()}'`);
-  view.threatV = 0.8; view.layout();
-  await view.wait(0.6);
-  await view.shotAt(false, goal ? 'goal' : 'save');
-  if (goal) {
-    m.score[1]++;
-    setScore();
-    sfx.groan();
-    shell.banner('GOAL', `${c.name} · ${m.score[0]}–${m.score[1]}`, '#FF6B6B');
-    shell.shake(); shell.flash('#E8463A');
-    view.celebrate('opp');
-    shell.log(`<b>${c.name} scores.</b> ${m.score[0]}–${m.score[1]}`, 'goal', `${minute()}'`);
-    await view.wait(1.2);
-    view.celebrate('opp', false);
-  } else {
-    shell.banner('SAVED!', `Wak · ${T.keeper} beats ${power}`, '#9BE7FF');
-    shell.log('Wak saves! Your ball from the back.', 'good', `${minute()}'`);
-    await view.wait(0.6);
-  }
+  const pct = Math.round(p * 100);
+  // He carries it at goal, then shoots.
+  const att = view.find(T.key);
+  // He shoots from the edge of the box, well clear of Wak (Wak stands at v 0.95).
+  const [sx, sy] = view.pitch.toPx(clamp(att.u, 0.35, 0.65), 0.68);
+  await view.runTo(att, sx, sy, 0.55);
+  await view.wait(0.1);
+  sfx.kick();
+  const wak = view.keeper('you');
+  await view.shotAt(false, goal ? 'goal' : 'save', () => {
+    shell.log(`${c.name} shoots (${pct}%): power ${theirPower(T.atk)}+${roll} = ${power} vs Wak ${T.keeper}.`, 'them', `${minute()}'`);
+    if (goal) {
+      m.score[1]++;
+      setScore();
+      sfx.groan();
+      shell.banner('GOAL', `${c.name} · ${m.score[0]}–${m.score[1]}`, '#FF6B6B');
+      shell.shake(); shell.flash('#E8463A');
+      view.celebrate('opp');
+      shell.log(`<b>${c.name} scores.</b> ${m.score[0]}–${m.score[1]}`, 'goal', `${minute()}'`);
+    } else {
+      sfx.save();
+      view.label(`SAVED · ${100 - pct}%`, wak.x, wak.y - view.size * 1.2, '#9BE7FF');
+      shell.log(`Wak saves (${T.keeper} holds ${power})! Your ball from the back.`, 'good', `${minute()}'`);
+    }
+  });
+  view.release(att);
   m.turn++;
   m.zone = 0; m.clock = 3; m.wall = [...m.wallMax];
   view.threatKey = null;
-  view.give(view.find('wak'));
-  busy = false;
+  if (goal) {
+    await view.wait(1.0);
+    view.celebrate('opp', false);
+    if (m.turn > TURNS) { view.recover(wak); return fullTime(); }
+    await view.cut(() => { view.recover(wak); view.setZone(0, 'attack'); view.give(wak); });
+  } else {
+    await view.wait(0.3);
+    view.recover(wak);          // Wak keeps it in his hands and gets up
+    if (m.turn > TURNS) return fullTime();
+  }
   startAttackTurn();
 }
 
@@ -526,25 +685,44 @@ function fullTime() {
   if (sheet) sheet.insertAdjacentHTML('beforeend', `<ul>${pool.map((u) => `<li><b>${UPGRADES[u].icon} ${UPGRADES[u].name}</b>: ${UPGRADES[u].text}</li>`).join('')}</ul>`);
 }
 
-// A drawn Final goes to sudden-death penalties (odds shown first).
+// A drawn Final goes to sudden-death penalties (odds shown first). Each kick
+// is shown: cut to the spot, shoot, result on the frame the ball arrives.
 async function penalties() {
-  busy = true;
+  setBusy(true);
   const pY = 4 / 6, pO = 0.6;
   const pWin = pY * (1 - pO) / (pY * (1 - pO) + pO * (1 - pY));
   await shell.modal({ title: 'Penalties!', dismiss: false,
     html: `<p>${m.score[0]}–${m.score[1]} after 90. Sudden death: Rio scores ${Math.round(pY * 100)}%, their takers ${Math.round(pO * 100)}% (Wak).</p><p>Your chance to lift the Cup: <span class="odds ${pWin >= 0.5 ? 'mid' : 'lo'}">${Math.round(pWin * 100)}%</span></p>`,
     buttons: [{ label: 'Take the penalties ▶' }] });
-  let round = 0, res = null;
+  view.mode = 'pens';
+  renderAll();
+  const takers = ['viper', 'kofi', 'zed'];
+  let round = 0, res = null, ys = 0, os = 0;
+  const kick = async (key, top, scored) => {
+    const k = view.find(key);
+    await view.cut(() => { view.mode = 'pens'; view.kicker = key; view.kickSpot = top ? [0.5, 0.22] : [0.5, 0.78]; view.give(k); });
+    await view.wait(0.35);
+    sfx.kick();
+    const gk = view.keeper(top ? 'opp' : 'you');
+    await view.shotAt(top, scored ? 'goal' : 'save', () => {
+      if (top) ys += scored ? 1 : 0; else os += scored ? 1 : 0;
+      setScore(`P ${ys}–${os}`);
+      scored ? (top ? sfx.goal() : sfx.groan()) : sfx.save();
+      view.label(scored ? 'SCORES!' : 'SAVED!', view.w / 2, view.pitch.toPx(0, top ? 0.12 : 0.88)[1], scored === top ? '#FFD23F' : '#FF8A80', 1.1, true);
+      shell.log(`Pens round ${round}: ${byId[key].name} ${scored ? 'scores' : 'is saved'}.`, scored === top ? 'good' : 'bad', 'P');
+    });
+    await view.wait(0.5);
+    view.recover(gk);
+  };
   while (!res && round < 20) {
     round++;
     const y = Math.random() < pY, o = Math.random() < pO;
-    shell.log(`Pens round ${round}: Rio ${y ? 'scores' : 'misses'}, they ${o ? 'score' : 'miss'}.`, y && !o ? 'good' : !y && o ? 'bad' : '', 'P');
-    view.give(view.find('rio'));
-    await view.shotAt(true, y ? 'goal' : 'save');
+    await kick('rio', true, y);
+    await kick(takers[(round - 1) % 3], false, o);
     if (y !== o) res = y ? 'W' : 'L';
   }
   m.pens = res || 'W';
-  busy = false;
+  setBusy(false);
   fullTime();
 }
 
@@ -557,8 +735,10 @@ function renderAll(rolling = false) {
   stage.querySelector('#clock').innerHTML = attack
     ? `<span class="kicker">⏱ Pressure</span> ${[0, 1, 2].map((i) => `<i class="pip ${i < m.clock ? 'on' : ''} ${m.clock === 1 ? 'hot' : ''}"></i>`).join('')} <span class="muted">Turn ${Math.min(m.turn, TURNS)}/${TURNS}</span>`
     : `<span class="kicker red">DEFEND</span> <span class="muted">Turn ${m.turn}/${TURNS}</span>`;
-  stage.querySelector('#modebadge').innerHTML = attack ? `ATTACKING · ${ZONES[m.zone]}` : `DEFENDING · ${byId[m.threat.key].name}`;
-  stage.querySelector('#modebadge').className = 'modebadge ' + (attack ? '' : 'def');
+  stage.querySelector('#modebadge').innerHTML = m.mode === 'over' ? (m.pens || view.mode === 'pens' ? 'PENALTIES' : 'FULL TIME') : attack ? `ATTACKING · ${ZONES[m.zone]}` : `DEFENDING · ${byId[m.threat.key].name}`;
+  // Badge sits in the corner away from the ball: bottom while the play is up the pitch.
+  const low = m.mode === 'defend' || (attack && m.mode !== 'over' && m.zone >= 1);
+  stage.querySelector('#modebadge').className = 'modebadge ' + (attack ? '' : 'def') + (low ? ' low' : '');
   // zone track or threat panel
   const zt = stage.querySelector('#ztrack');
   if (attack) {
@@ -574,19 +754,23 @@ function renderAll(rolling = false) {
     zt.innerHTML = `<div class="threat"><img src="${portrait(byId[T.key], 40)}" alt="">
       <div class="grow"><b>${byId[T.key].name}</b> attack <span class="hp red"><i style="width:${(T.atk / T.start) * 100}%"></i></span> <b>${T.atk}</b>
       <div class="muted" style="font-size:11px">Shot ${theirPower(T.atk)}+d6 vs Wak ${T.keeper}${m.used['wak:save'] ? '' : ' (no die yet!)'}</div></div>
-      <div class="center"><div style="font-size:10px">They score</div><span class="odds ${oddsClass(1 - p)}">${Math.round(p * 100)}%</span></div></div>`;
+      <div class="center"><div style="font-size:10px;line-height:1.4;margin-bottom:1px">They score</div><span class="odds ${oddsClass(1 - p)}">${Math.round(p * 100)}%</span></div></div>`;
   }
   // info line
   const d = m.dice.find((x) => x.id === m.sel);
   const info = stage.querySelector('#info');
-  if (m.mode === 'over') info.innerHTML = 'Full time.';
-  else if (d) info.innerHTML = `Die <b>${d.v}</b> selected — tap a glowing socket.${has('lucky') && !m.luckyUsed ? ' <button class="btn small green" id="lucky">🍀 Reroll <span class="key">G</span></button>' : ''}`;
-  else info.innerHTML = attack
+  const left = free().length;
+  // Each message is one <span> so bold parts don't split into separate flex items.
+  if (m.mode === 'over') info.innerHTML = view.mode === 'pens' ? 'Penalties: sudden death.' : 'Full time.';
+  else if (!busy && !d && !left && !rolling) info.innerHTML = `<span>${m.mode === 'defend' ? 'No dice left. Press <b>Defend</b> to face the shot.' : 'No dice left. Press <b>End turn</b>.'}</span>`;
+  else if (d) info.innerHTML = `<span>Die <b>${d.v}</b> selected — ${holdsAny(d) ? 'the wall <b>holds at 1</b> this turn (one line per turn).' : 'tap a glowing socket.'}</span>${has('lucky') && !m.luckyUsed ? ' <button class="btn small green" id="lucky">🍀 Reroll <span class="key">G</span></button>' : ''}`;
+  else info.innerHTML = '<span>' + (attack
     ? (m.zone === 3 ? `In the Box! Rio's Shoot takes a 5–6. ${m.wall[3] > 0 ? 'Chip the box wall to weaken their keeper.' : 'Wall down — shoot!'}` : `Chip the ${ZONES[m.zone]} wall: ${m.wall[m.zone]} left. Tap a die.`)
-    : 'Tackle their attack down to 0 to win it, and give Wak a die for the save. Then press Defend.';
+    : `Tackle their attack to 0 to win it, and give Wak a die for the save.${left ? ` <b>${left} ${left > 1 ? 'dice' : 'die'} left</b>.` : ''}`) + '</span>';
   info.querySelector('#lucky')?.addEventListener('click', luckyReroll);
   // dice
-  if (!rolling) {
+  if (m.mode === 'over') stage.querySelector('#dice').innerHTML = '';
+  else if (!rolling) {
     const avail = m.dice;
     stage.querySelector('#dice').innerHTML = avail.length ? avail.map((x, i) => dieHTML(x, { attr: `data-die="${x.id}" role="button" tabindex="0"`, key: i + 1 })).join('') : '<span class="muted" style="font-size:12px">No dice left.</span>';
     stage.querySelectorAll('#dice .die').forEach((el) => {
@@ -595,7 +779,7 @@ function renderAll(rolling = false) {
     });
   } else stage.querySelector('#dice').innerHTML = '';
   const eb = stage.querySelector('#endbtn');
-  eb.innerHTML = m.mode === 'defend' ? 'Defend ▶ <span class="key">↵</span>' : 'End turn <span class="key">↵</span>';
+  eb.innerHTML = m.mode === 'over' ? 'Full time' : m.mode === 'defend' ? 'Defend ▶ <span class="key">↵</span>' : 'End turn <span class="key">↵</span>';
   eb.className = 'btn ' + (m.mode === 'defend' ? 'red' : free().length ? 'paper' : '');
   eb.disabled = m.mode === 'over';
   // cards
@@ -621,7 +805,7 @@ function sockHTML(s, d, idx) {
   const why = off ? sockState(s, null).why : '';
   return `<div class="sock ${d ? (st.ok ? 'ok' : 'no') : ''} ${used ? 'used' : ''} ${off && !used ? 'off' : ''}" data-sock="${s.key}" title="${A.name} (${A.need}): ${A.text}">
     <div class="hole">${used ? dieHTML(null, { face: used.v, cls: 'in' }) : `<span class="need">${A.need}</span>`}${badge}<span class="kh">${SOCK_KEYS[idx]?.toUpperCase() || ''}</span></div>
-    <div class="aname">${A.name}${why && !used ? `<small>${why}</small>` : ''}</div></div>`;
+    <div class="aname">${A.name}${why && !used ? `<small>${why}</small>` : A.kind === 'shot' && !used ? '<small>ends attack</small>' : ''}</div></div>`;
 }
 function popZone(z, text) {
   const el = stage.querySelector(`[data-zone="${z}"]`);

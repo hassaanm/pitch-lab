@@ -109,7 +109,7 @@ export const DIVISIONS = ['Division Three', 'Division Two', 'Division One', 'Tit
 
 // Base opponent strength per round (0..3). Style skews it.
 export function opponentStats(round, style, isBoss) {
-  const b = [8, 9.5, 11, 12.5][round] + (isBoss ? 0.5 : 0);
+  const b = [8.6, 9.8, 10.8, 10.9][round] + (isBoss ? 0.5 : 0);
   const s = { ctrl: b, atk: b, fin: b, def: b, prs: b, gk: b };
   const skew = {
     possession: { ctrl: 3, atk: 1, prs: -1, def: -1 },
@@ -165,12 +165,12 @@ export const CARDS = {
   manmark:   { name: 'Man-Mark Their Star', cost: 1, style: 'bus', type: 'tactic', icon: '👁️', oppFx: { fin: -3 }, text: 'Their Finishing −3' },
   contro:    { name: 'Contropiede', cost: 1, style: 'bus', type: 'tactic', icon: '🏹', counter: 0.3, counterXg: 0.05, text: '+30% counter chance, counters +5% xG' },
   foul:      { name: 'Tactical Foul', cost: 0, style: 'bus', type: 'tactic', icon: '🟨', cancelBig: 1, text: 'Stop their next big chance. Booking risk.' },
-  thunderhead:{ name: 'Big Mo: Thunder Head', cost: 1, style: 'bus', type: 'player', who: 'mo', fx: { def: 2 }, setPiece: 0.18, text: '+2 Defence. Corner routine: 18% goal.' },
+  thunderhead:{ name: 'Big Mo: Thunder Head', cost: 1, style: 'bus', type: 'player', who: 'mo', fx: { def: 2 }, setPiece: 0.15, text: '+2 Defence. Corner routine: 15% goal.' },
 
   // ---- intensity (Premiere League / Sir Thunder)
   cross:     { name: 'Get It in the Mixer', cost: 1, style: 'power', type: 'tactic', icon: '🎯', fx: { atk: 2, fin: 1 }, header: true, text: '+2 Attack, +1 Finishing. Headers!' },
   secondball:{ name: 'Second Balls', cost: 1, style: 'power', type: 'tactic', icon: '🦵', fx: { ctrl: 2, prs: 1 }, sta: -4, text: '+2 Control, +1 Press · −4 stamina' },
-  setpiece:  { name: 'Set-Piece Routine', cost: 1, style: 'power', type: 'tactic', icon: '🚩', setPiece: 0.24, text: 'One extra corner: 24% goal.' },
+  setpiece:  { name: 'Set-Piece Routine', cost: 1, style: 'power', type: 'tactic', icon: '🚩', setPiece: 0.2, text: 'One extra corner: 20% goal.' },
   upandatem: { name: "Up and At 'Em", cost: 2, style: 'power', type: 'tactic', icon: '💥', fx: { atk: 3, prs: 2 }, sta: -12, text: '+3 Attack, +2 Press · −12 stamina' },
   hairdryer: { name: 'Hairdryer', cost: 0, style: 'power', type: 'tactic', icon: '😤', ifTrailing: { atk: 2, prs: 2, fin: 1 }, text: 'If losing: +2 Attack, +2 Press, +1 Finishing.' },
   ram:       { name: 'Bruno: Battering Ram', cost: 1, style: 'power', type: 'player', who: 'bruno', fx: { atk: 2 }, arm: { xg: 0.1, who: 'bruno' }, text: '+2 Attack. Next big chance: +10% (Bruno).' },
