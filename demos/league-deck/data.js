@@ -109,7 +109,7 @@ export const DIVISIONS = ['Division Three', 'Division Two', 'Division One', 'Tit
 
 // Base opponent strength per round (0..3). Style skews it.
 export function opponentStats(round, style, isBoss) {
-  const b = [8.6, 9.8, 10.8, 10.9][round] + (isBoss ? 0.5 : 0);
+  const b = [7.8, 9.8, 10.8, 10.9][round] + (isBoss ? 0.5 : 0);
   const s = { ctrl: b, atk: b, fin: b, def: b, prs: b, gk: b };
   const skew = {
     possession: { ctrl: 3, atk: 1, prs: -1, def: -1 },

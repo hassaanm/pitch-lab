@@ -14,7 +14,7 @@ export const SPELLS = 6;
 // scoring tuning (see NOTES.md: about 2–4 goals a match)
 export const XG_BASE = 0.055, XG_PER_FIN = 0.01, BIG_BASE = 0.2, BIG_MIN = 0.18, BIG_MULT = 3.0, TURN_XG = 0.07, COUNTER_XG = 0.08;
 export const RUSH_FOUL = 0.1, PEN_GOAL = 0.76, GUESS_RIGHT = 0.9, GUESS_WRONG = 0.15;
-export const STAY_K = 1.5, RUSH_BASE = 0.99, RUSH_K = 0.6, RUSH_PER_DRIBBLE = 0.085, READ_BASE = 0.555, READ_PER_SHOOT = 0.055;
+export const STAY_K = 1.5, STAY_PER_SHOOT = 0.15, RUSH_BASE = 0.99, RUSH_K = 0.6, RUSH_PER_DRIBBLE = 0.11, READ_BASE = 0.555, READ_PER_SHOOT = 0.06;
 export const SPELL_MIN = 15;
 
 // ---------------------------------------------------------------- stats
@@ -212,18 +212,18 @@ export function momentOptions(m, beat, Y, O) {
     ];
   }
   // Each option is best in a situation you can read from the shooter (tuned over every
-  // rival shooter and chance quality the player meets; see NOTES.md):
+  // rival shooter and the chance qualities logged in real play; see NOTES.md):
   //   rush out   beats a poor dribbler (Dribble 6 or less);
-  //   guess      beats a sharp finisher (Finishing 8+) on a good chance: the sharper he
-  //              is, the more often Wak reads which side he will pick;
-  //   stay big   otherwise (a half chance, or a dribbler who is not a sharp finisher).
+  //   guess      beats a sharp finisher (Finishing 8+): standing big gives him the
+  //              corner he wants, and Wak reads sharp finishers more often;
+  //   stay big   otherwise (an average finisher who can dribble).
   const g = goalP(beat.xg, Y);
   const sh = beat.shooter;
-  const stay = clamp(1 - g * STAY_K, 0.05, 0.97);
+  const stay = clamp(1 - g * STAY_K * (1 + STAY_PER_SHOOT * Math.max(0, sh.stats.shoot - 6)), 0.05, 0.97);
   const rushSave = clamp(RUSH_BASE - g * RUSH_K - RUSH_PER_DRIBBLE * (sh.stats.dribble - 6), 0.05, 0.97);
   const right = clamp(READ_BASE + READ_PER_SHOOT * (sh.stats.shoot - 6), 0.3, 0.8);
   return [
-    { id: 'stay', label: 'Wak stays big', p: stay, detail: 'best on a half chance' },
+    { id: 'stay', label: 'Wak stays big', p: stay, detail: `vs finishing ${sh.stats.shoot}` },
     { id: 'rush', label: 'Wak rushes out', p: rushSave * (1 - RUSH_FOUL) + RUSH_FOUL * (1 - PEN_GOAL), saveP: rushSave, detail: `vs dribble ${sh.stats.dribble} · ${Math.round(RUSH_FOUL * 100)}% pen risk` },
     { id: 'guess', label: 'Wak guesses a side', p: right * GUESS_RIGHT + (1 - right) * GUESS_WRONG, right, detail: `reads finishing ${sh.stats.shoot}: ${Math.round(right * 100)}% right` },
   ];

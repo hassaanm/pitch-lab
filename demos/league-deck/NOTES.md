@@ -56,3 +56,16 @@ What changed and why:
   otherwise stay big (best option shares 41 / 21 / 38%).
 - Ladder bases [8.6, 9.8, 10.8, 10.9] (+0.5 boss): about 74 / 62 / 48 / 35% wins
   per rung for a sensible player; about 2.4–2.7 goals a match.
+
+## Last round
+
+- Lane: outfield players (crosser too) step clear of the drawn ball path for the whole
+  flight (0.5 sprite sizes, head included) and of the keeper's planned dive (0.85).
+- Wrong-way leg save: he dives away from the shooter's side; the ball comes in low to
+  the trailing boot.
+- Defending (tuned on logged real chance qualities): standing big now concedes more to
+  sharp finishers, so Guess wins vs Finishing 8+ (Viper: 90% of his chances), Stay vs
+  average finishers who dribble (Zed 88%), Rush vs poor dribblers.
+- First rung eased to base 7.8: about 82% wins (sensible), 76% (random cards).
+- Played cards keep their own row while a card is previewed; the GOAL banner sits over
+  the other half of the pitch; save lines show the one figure the player was shown.

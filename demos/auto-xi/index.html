@@ -120,7 +120,8 @@
   .scard.poor { filter: grayscale(.7) brightness(.85); }
   .scard.combo { animation: glowc 0.9s ease-in-out infinite alternate; }
   @keyframes glowc { from { box-shadow: 0 3px 0 var(--ink), 0 0 0 0 #FFD23F; } to { box-shadow: 0 3px 0 var(--ink), 0 0 12px 4px #FFD23F; } }
-  .scard .own { font-size: 9px; letter-spacing: 1px; color: #b07a00; }
+  /* copies owned: pinned in the corner so a card never changes height */
+  .scard .own { position: absolute; top: 1px; right: 4px; font-size: 9px; letter-spacing: 1px; color: #b07a00; line-height: 1; }
   .scard.sold { background: rgba(255,255,255,.05); border-style: dashed; border-color: rgba(255,255,255,.2); box-shadow: none; color: rgba(255,255,255,.3); font-family: var(--font-h); justify-content: center; cursor: default; }
 
   /* projection */
@@ -136,7 +137,8 @@
   .crow .v { font-family: var(--font-h); font-size: 12.5px; text-align: center; }
   .sbar { height: 12px; border: 2px solid var(--ink); border-radius: 6px; overflow: hidden; display: flex; background: var(--red); }
   .sbar i { display: block; height: 100%; background: var(--sun); border-right: 2px solid var(--ink); }
-  .notes { font-size: 11px; color: var(--bad); margin-top: 4px; }
+  /* fixed two-line slot: a new warning never changes the panel's height */
+  .notes { font-size: 11px; line-height: 14px; height: 28px; color: var(--bad); margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 
   /* match */

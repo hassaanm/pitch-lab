@@ -206,7 +206,7 @@ function moveUnit(from, to) {
     sfx.bad(); shell.toast(`Formation full (${run.slots}). Level up${KB ? ' (F)' : ''} or swap with a player on the pitch.`);
     return;
   }
-  const ra = unitImg(from.where, from.i)?.getBoundingClientRect(), rb = unitImg(to.where, to.i)?.getBoundingClientRect();
+  const ra = srcRect(from.where, from.i), rb = b ? srcRect(to.where, to.i) : null;
   run[from.where][from.i] = b;
   run[to.where][to.i] = a;
   sel = null;
@@ -231,23 +231,49 @@ function morph(a, b) {
   bc.forEach((n, i) => { if (i < ac.length) morph(ac[i], n); else a.appendChild(n); });
   for (let i = bc.length; i < ac.length; i++) ac[i].remove();
 }
-// A sprite travels from a screen rect to the image it ends up as.
-function fly(from, img) {
+// A sprite travels from a screen rect (the tapped card or slot) to the image it
+// ends up as. The target is hidden at once; the flight waits (at most 250 ms)
+// for the sprite to decode, and falls back to the slot's centre if it still has
+// no size. The clone is always removed, even if the animation fails.
+const flights = new Set();
+async function fly(from, img) {
   if (!from || !img) return;
-  const to = img.getBoundingClientRect();
-  if (!to.width) return;
-  const g = img.cloneNode();
-  g.className = 'flyer';
-  Object.assign(g.style, { left: from.left + 'px', top: from.top + 'px', width: from.width + 'px', height: from.height + 'px' });
-  document.body.appendChild(g);
   img.style.visibility = 'hidden';
-  const dx = to.left - from.left, dy = to.top - from.top, k = to.height / Math.max(1, from.height);
-  g.animate([{ transform: 'none' }, { transform: `translate(${dx}px, ${dy}px)` }], { duration: 260, easing: 'cubic-bezier(.3,.7,.3,1)' })
-    .finished.catch(() => {}).then(() => { g.remove(); img.style.visibility = ''; });
-  g.animate([{ width: from.width + 'px', height: from.height + 'px' }, { width: to.width + 'px', height: to.height + 'px' }], { duration: 260, easing: 'cubic-bezier(.3,.7,.3,1)' });
-  void k;
+  const g = document.createElement('img');
+  g.className = 'flyer';
+  flights.add(g);
+  const done = () => { g.remove(); flights.delete(g); if (img.isConnected) img.style.visibility = ''; };
+  const guard = setTimeout(done, 1200);
+  try {
+    if (!img.complete || !img.naturalWidth) await Promise.race([img.decode().catch(() => {}), new Promise((r) => setTimeout(r, 250))]);
+    if (!img.isConnected) return;
+    let to = img.getBoundingClientRect();
+    if (!to.width || !to.height) {
+      const slot = img.closest('.slot')?.getBoundingClientRect();
+      if (!slot) return;
+      const h = Math.min(slot.height * 0.7, from.height), w = h * (from.width / Math.max(1, from.height));
+      to = { left: slot.left + (slot.width - w) / 2, top: slot.top + 4, width: w, height: h };
+    }
+    g.src = img.src;
+    Object.assign(g.style, { left: to.left + 'px', top: to.top + 'px', width: to.width + 'px', height: to.height + 'px' });
+    document.body.appendChild(g);
+    window.__flights?.push({ from: [from.left, from.top, from.width, from.height].map(Math.round), to: [to.left, to.top, to.width, to.height].map(Math.round) });
+    const sx = from.width / Math.max(1, to.width), sy = from.height / Math.max(1, to.height);
+    await g.animate([
+      { transform: `translate(${from.left - to.left}px, ${from.top - to.top}px) scale(${sx}, ${sy})`, transformOrigin: '0 0' },
+      { transform: 'none', transformOrigin: '0 0' },
+    ], { duration: 260, easing: 'cubic-bezier(.3,.7,.3,1)' }).finished;
+  } catch { /* fall through: never leave a clone behind */ } finally { clearTimeout(guard); done(); }
 }
+if (new URLSearchParams(location.search).has('jank')) window.__flights = [];
 const rectOf = (sel) => stage.querySelector(sel)?.getBoundingClientRect() || null;
+// Where a unit visibly is now: its sprite, or the middle of its slot if the sprite has no size.
+function srcRect(where, i) {
+  const r = unitImg(where, i)?.getBoundingClientRect();
+  if (r && r.width && r.height) return r;
+  const sl = stage.querySelector(`.slot[data-where="${where}"][data-i="${i}"]`)?.getBoundingClientRect();
+  return sl ? { left: sl.left + sl.width * 0.25, top: sl.top + 4, width: sl.width * 0.5, height: sl.height * 0.6 } : null;
+}
 const unitImg = (where, i) => stage.querySelector(`.slot[data-where="${where}"][data-i="${i}"] .unit img`);
 
 // ================================================================ draft screen
@@ -294,7 +320,7 @@ function draftScreen(enter = false) {
       <div class="wdl">Win ${oddsPill(P.w)} Draw ${oddsPill(P.d)} Loss ${oddsPill(P.l)}</div>
       <div class="xg">xG <b>${P.xgY.toFixed(2)}</b> – <b>${P.xgO.toFixed(2)}</b> · Ball ${Math.round(P.share * 100)}%</div>
       ${compareHTML(you, opp)}
-      ${you.notes.length ? `<div class="notes">${you.notes.map((n) => '⚠ ' + n).join('<br>')}</div>` : ''}
+      <div class="notes" title="${you.notes.join(' · ')}">${you.notes.length ? '⚠ ' + you.notes.join(' · ') : '<span class="muted">No warnings: everyone is in position.</span>'}</div>
     </div>
   </div>`;
   const cur = stage.querySelector('.ax.draft');

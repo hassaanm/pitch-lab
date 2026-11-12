@@ -21,7 +21,7 @@ const shell = new Shell({
     'Three duels decide every attack: Keep the ball (Control vs Press), Break the line (Attack vs Defence) and Score (Finish vs Keeper). The bars show both sides\' odds.',
     'Tap a card to preview it: the bars show what it changes. Tap it again to play it. Tap a played card to take it back.',
     'Kick off to watch the spell. When a card swings a duel, the pitch names it (your cards in gold, theirs in red). On a big chance you choose what happens.',
-    'Defending a big chance: rush out against a poor dribbler (Dribble 6 or less; small penalty risk). Guess a side against a sharp finisher (Finishing 8+) on a good chance: Wak reads sharp finishers more often. Otherwise stay big. The odds on each button show it.',
+    'Defending a big chance: rush out against a poor dribbler (Dribble 6 or less; small penalty risk). Guess a side against a sharp finisher (Finishing 8+): Wak reads sharp finishers more often. Otherwise stay big. The odds on each button show it.',
     'Win to draft a new card. Beat the legend to unlock that coach and their style.',
     'Keys: 1–7 select / play a card, Enter kicks off, D shows your deck, U takes back the last card.',
   ],
@@ -451,6 +451,7 @@ function planPanel() {
       <span class="lbl">${oc ? oc.name.split(' ').pop() : 'They'} plan:</span>
       <div class="chips">${m.opp.played.length ? m.opp.played.map((id) => { const c = CARDS[id]; return `<span class="ichip" data-tip="${c.name}: ${c.text}"><i style="background:${STYLES[c.style].color}">${c.icon || '👤'}</i>${c.name}</span>`; }).join('') : '<span class="ichip">Nothing special</span>'}</div></div>
     ${duelsHTML()}
+    <div class="played" id="played"></div>
     <div class="infoline" id="infoline"></div>
     <div class="hand" id="hand"></div>
     <div class="planbar"><div><div class="shouts" id="shouts"></div><div class="deckinfo" id="deckinfo"></div></div>
@@ -489,16 +490,14 @@ function renderPlan() {
   if (selId) {
     const c = CARDS[selId];
     const cost = S.cardCost(m, selId);
-    // keep what you have already played in view while previewing (as a compact count)
-    const pl = me.played.length ? `<span class="plcount" title="${me.played.map((id) => CARDS[id].name).join(', ')}">${me.played.map((id) => CARDS[id].icon || '👤').join('')}</span> ` : '';
-    info(`${pl}<b>${c.name}</b> · ${c.text} <span class="tapagain">${cost > me.shouts ? `Needs ${cost} 📣` : 'Tap again to play'}</span>`);
-  } else if (me.played.length) {
-    // the played cards share this line (tap one to take it back); it never wraps
-    info(`<div class="played">${me.played.map((id, i) => `<span class="pchip" data-pi="${i}" title="Tap to take back">${CARDS[id].icon || '👤'} ${CARDS[id].name}<i>↩</i></span>`).join('')}</div>`);
-    stage.querySelectorAll('#infoline .pchip').forEach((el) => el.onclick = () => undoCard(+el.dataset.pi));
+    info(`<b>${c.name}</b> · ${c.text} <span class="tapagain">${cost > me.shouts ? `Needs ${cost} 📣` : 'Tap again to play'}</span>`);
   } else {
-    info(`Read their plan, then pick the duels to win. <span class="muted">Tap a card to preview it.</span>`);
+    info(me.played.length ? `Tap a played card to take it back, or a card below to preview it.` : `Read their plan, then pick the duels to win. <span class="muted">Tap a card to preview it.</span>`);
   }
+  // played cards: their own row, always visible (scrolls sideways, never wraps)
+  const pl = stage.querySelector('#played');
+  pl.innerHTML = me.played.map((id, i) => `<span class="pchip" data-pi="${i}" title="Tap to take back">${CARDS[id].icon || '👤'} ${CARDS[id].name}<i>↩</i></span>`).join('') || '<span class="muted">Played cards show here.</span>';
+  pl.querySelectorAll('.pchip').forEach((el) => el.onclick = () => undoCard(+el.dataset.pi));
   // hand
   const hand = stage.querySelector('#hand');
   hand.classList.toggle('many', me.hand.length > 5);
@@ -553,7 +552,7 @@ function playCard(i) {
 
 // The played card flies from the hand to its chip in the played row.
 function flyCard(id, from) {
-  const chip = stage.querySelector('#infoline .pchip:last-child');
+  const chip = stage.querySelector('#played .pchip:last-child');
   if (!from || !chip) return;
   const to = chip.getBoundingClientRect();
   chip.style.visibility = 'hidden';
@@ -793,9 +792,10 @@ function playShot(actor, side, result, p, o = {}) {
   return view.shot(actor, side, result, { header: o.header, dive: o.dive, ...L, onHit: (i) => {
     const how = o.kind === 'counter' ? ' on the break' : o.kind === 'turnover' ? ' after the steal' : o.kind === 'freekick' ? ' from the free kick' : o.kind === 'penalty' ? ' from the spot' : o.header ? ' with a header' : '';
     const note = o.note ? ` ${o.note}.` : '';
-    if (i.result === 'goal') { goal(side, actor.c, fin); if (side === 'you' && o.ctx) o.ctx.scored = true; say(`GOAL! ${nm(actor)} scores${how} (${pct}% chance)${why(fin)}. ${m.score[0]}–${m.score[1]}.${note}`, 'goal'); }
-    else if (i.kind === 'save') say(`${nm(i.by)} saves from ${nm(actor)}${how} (${pct}% chance)${why(stop)}.${note}`, side === 'you' ? 'bad' : 'good');
-    else say(`${nm(actor)}${how ? ' shoots' + how + ' and' : ''} hits ${i.kind === 'post' ? 'the post' : 'it wide'} (${pct}% chance)${why(stop)}.`, side === 'you' ? 'bad' : 'good');
+    const odds = o.odds || `${pct}% chance`; // the figure the player was shown
+    if (i.result === 'goal') { goal(side, actor.c, fin); if (side === 'you' && o.ctx) o.ctx.scored = true; say(`GOAL! ${nm(actor)} scores${how} (${odds})${why(fin)}. ${m.score[0]}–${m.score[1]}.${note}`, 'goal'); }
+    else if (i.kind === 'save') say(`${nm(i.by)} saves from ${nm(actor)}${how} (${odds})${why(stop)}.${note}`, side === 'you' ? 'bad' : 'good');
+    else say(`${nm(actor)}${how ? ' shoots' + how + ' and' : ''} hits ${i.kind === 'post' ? 'the post' : 'it wide'} (${odds})${why(stop)}.`, side === 'you' ? 'bad' : 'good');
   } });
 }
 
@@ -804,6 +804,9 @@ function goal(side, scorer, card) {
   shell.setScore({ home: m.score[0], away: m.score[1], clock: `${curMin}'`, awayTeam: 'red' });
   if (side === 'you') { shell.banner('GOAL!', `${scorer.name} ${curMin}'${card ? ' · ' + card.name : ''}`); shell.confetti(); }
   else shell.banner('GOAL', `${scorer.name} · ${teamName('opp')}`, '#ff8a80');
+  // keep the banner over the other half of the pitch, so the ball going in stays visible
+  const bn = [...document.querySelectorAll('.banner')].pop(), r = stage.querySelector('.pitchwrap')?.getBoundingClientRect();
+  if (bn && r) bn.style.top = `${Math.round(r.top + r.height * (side === 'you' ? 0.66 : 0.3))}px`;
   shell.shake(stage.querySelector('.pitchwrap'));
 }
 
@@ -811,7 +814,12 @@ async function keyMomentBeat(b, Y, O, ctx) {
   const side = b.side;
   const actor = await view.setShooter(b.shooter, side);
   if (!view) return;
+  await view.holdGap(actor); // never drawn on top of the keeper while you choose
+  if (!view) return;
+  // ...and both hold still while the choice is shown (the keeper would drift off his line)
+  const holdStill = view.lock(actor, view.keeper(side === 'you' ? 'opp' : 'you'));
   const opts = S.momentOptions(m, b, Y, O);
+  if (window.__touchline) (window.__touchline.moments ||= []).push({ side, shooter: b.shooter.name, fin: b.shooter.stats.shoot, dri: b.shooter.stats.dribble, xg: +b.xg.toFixed(3), opts: opts.map((o) => `${o.id} ${Math.round(o.p * 100)}`) });
   // make the options visible on the pitch: the square option's teammate makes a run
   let mateActor = null;
   let sceneReady = Promise.resolve();
@@ -826,6 +834,7 @@ async function keyMomentBeat(b, Y, O, ctx) {
     }
   }
   const choice = await keyMoment(b, opts, sceneReady);
+  holdStill();
   if (!view) return;
   livePanel();
   updateDuels(S.projection(m));
@@ -854,7 +863,7 @@ async function keyMomentBeat(b, Y, O, ctx) {
     await view.rushOut('opp');
     if (res.penalty) {
       const taker = await view.penalty('opp', b.shooter, { onHit: (i) => say(`Wak brings down ${nm(i.from)}. Penalty!`, 'bad') });
-      return playShot(taker, 'opp', res.result, S.PEN_GOAL, { kind: 'penalty', ctx });
+      return playShot(taker, 'opp', res.result, S.PEN_GOAL, { kind: 'penalty', ctx, odds: `penalty, ${Math.round((1 - S.PEN_GOAL) * 100)}% save` });
     }
   }
   // The dive comes from the result: a wrong guess commits the wrong way; otherwise a
@@ -866,7 +875,7 @@ async function keyMomentBeat(b, Y, O, ctx) {
     label = res.result === 'save' ? (res.guess === 'right' ? 'GUESSED RIGHT!' : 'WRONG WAY… LEG SAVE!') : (res.guess === 'right' ? 'RIGHT WAY, BEATEN' : 'WRONG WAY!');
     if (res.guess === 'wrong' && res.result === 'save') note = 'Wak went the wrong way but his trailing leg kept it out';
   } else if (res.result === 'goal') dive = 'short';
-  return playShot(actor, 'opp', res.result, 1 - pct, { ctx, dive, label, note, moment: 'shoot' });
+  return playShot(actor, 'opp', res.result, 1 - pct, { ctx, dive, label, note, moment: 'shoot', odds: `${Math.round(pct * 100)}% save` });
 }
 
 function keyMoment(b, opts, ready = Promise.resolve()) {

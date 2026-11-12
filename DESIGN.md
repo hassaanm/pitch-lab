@@ -70,8 +70,8 @@ Clubs are parodies too (Liverpuddle, Real Madrib, Juventoos, Bayern Munchkin, Pa
 - Chance xG = 0.055 + 0.01·(fin − 10), clamped 0.03–0.35; big chance (20% + 2.5%·(atk − def), at least 18%) = ×3.0, at most 0.6
 - Goal = xG · (1 + (10 − keeper)·0.05)
 - Your big chance: square = pass (0.82 − 0.025·(def − 10)) × tap-in goal(xG 0.42); round the keeper = 0.2 + 0.05·(dribble − 5) + 0.015·(atk − def), clamped 10–65%
-- Their big chance (g = their goal chance): stay big saves 1 − 1.5·g; rush out saves 0.99 − 0.6·g − 0.085·(dribble − 6), with a 10% foul → penalty (scored 76%); guess reads the side 0.555 + 0.055·(shoot − 6) of the time (30–80%) and saves 90% if right, 15% if wrong
-- Opponent strength per rung: 8.6 / 9.8 / 10.8 / 10.9 (+0.5 for the legend), then skewed by style. About 74 / 62 / 48 / 35% wins per rung for a sensible player, and about 2.4–2.7 goals a match.
+- Their big chance (g = their goal chance): stay big saves 1 − 1.5·g·(1 + 0.15·(shoot − 6)) for finishers above 6; rush out saves 0.99 − 0.6·g − 0.11·(dribble − 6), with a 10% foul → penalty (scored 76%); guess reads the side 0.555 + 0.06·(shoot − 6) of the time and saves 90% if right, 15% if wrong
+- Opponent strength per rung: 7.8 / 9.8 / 10.8 / 10.9 (+0.5 for the legend), then skewed by style. About 82 / 59 / 49 / 35% wins per rung for a sensible player, and about 2.4–2.7 goals a match. So guess against a sharp finisher (Finishing 8+), rush against a poor dribbler (Dribble 6 or less), and stay big otherwise.
 
 ### What to notice
 Does a deck plus simulation keep football's flow while still giving real decisions? Does reading the rival's plan and choosing which duels to win feel like coaching? Do the pitch labels make it clear which of your cards paid off? Are the big-chance moments enough hands-on play?

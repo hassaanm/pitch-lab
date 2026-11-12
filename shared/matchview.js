@@ -58,7 +58,11 @@
 //                           line, celebration, then reset(conceding side) inside.
 //                           dive: 'wrong' | 'short' (goal) ; miss: 'wide' | 'post' ;
 //                           parry: true | false (save); dive: 'wrong' on a save = he
-//                           commits the wrong way and the ball hits his trailing leg.
+//                           commits the wrong way (away from the shooter's side) and the
+//                           ball comes in low to his trailing boot without crossing him.
+//                           Before the strike, outfield players (crosser included) step
+//                           clear of the drawn ball path (0.5 sprite sizes) and of the
+//                           keeper's planned path (0.85).
 //                           A save registers on the first frame ball and glove touch.
 //                           Every non-save path clears the keeper (where he is and
 //                           where he dives) by a ball's width. The aim is planned before the
@@ -68,6 +72,8 @@
 //                           drawPlayer's { lay } (actor.lay, 0..1) and are fully down
 //                           on the contact frame; standUp(actor) eases anyone back up.
 //   rushOut(side)           the keeper defending against side charges at the carrier.
+//   holdGap(actor)          keep a shooter ~2.5 body widths from the keeper he faces
+//                           (e.g. while a choice is shown).
 //   roundKeeper(actor, side, result)  1-v-1: rounds the keeper (goal/miss) or is smothered (save).
 //   penalty(side, takerC)   keeper fouls the carrier, PENALTY!, taker carries the ball to
 //                           the spot, keeper back on the line. Returns the taker; then shot().
@@ -126,6 +132,7 @@ function diveGloves(c, lay = 1) {
   return [(f[0] + b[0]) / 2 - 2.5 * lay, (f[1] + b[1]) / 2];
 }
 const LYING = new Set(['dive', 'slide', 'tackle']);
+const LANE_GAP = 0.5, KEEPER_GAP = 0.85; // sprite sizes: ball path to any outfield body, outfield player to keeper
 const SHORT_TRAVEL = 0.1; // how far (sprite sizes) a beaten keeper's body travels toward the ball
 const distSeg = (p, a, b) => {
   const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy || 1;
@@ -746,7 +753,19 @@ export class MatchView {
       const hp = headPt(A.c);
       const S0 = header ? [A1[0] + hp[0] * this.s * af, A1[1] + 1] : [A1[0] + af * this.size * 0.2, A1[1] + 1];
       const plan = this.planShot(result, S0, K, gx, gy, half, { ...o, h0: header ? -hp[1] * this.s : 0 });
-      await this.clearLane(S0, [plan.tx, gy], [A, K, D]);
+      // the drawn ball path for the whole flight (heights as the result will play them)
+      const hS = header ? -hp[1] * this.s : 0;
+      const [hE, arc] = result === 'goal' ? [5 * this.s, 5] : result === 'save' ? [-diveGloves(K.c)[1] * this.s, 4] : [(plan.post ? 8 : 6) * this.s, plan.post ? 5 : 9];
+      const path = [];
+      for (let i = 0; i <= 30; i++) { const k = i / 30; path.push([lerp(S0[0], plan.tx, k), lerp(S0[1], gy, k) - (lerp(hS, hE, k) + Math.sin(k * Math.PI) * arc)]); }
+      // where the keeper will be: his planned dive or shuffle, or (saves) the line to the save point
+      const kPath = [];
+      if (K) {
+        if (plan.kp && plan.kp.type !== 'still') for (let i = 0; i <= 8; i++) { const st = this.kAt(K, plan.kp, (plan.kp.T * i) / 8); kPath.push([st.x, st.y]); }
+        else if (result === 'save') { const P = this.lineAt(S0, plan.tx, gy, K.y); for (let i = 0; i <= 8; i++) kPath.push([lerp(K.x, P[0], i / 8), K.y]); }
+        else kPath.push([K.x, K.y]);
+      }
+      await this.clearLane(path, [A, K], K, kPath);
       // ---- delivery or wind-up
       let h0 = 0;
       if (delivery) h0 = await this.deliver(D, A, header, gx, A1, af);
@@ -825,6 +844,34 @@ export class MatchView {
     return gap;
   }
 
+  // Keep a shooter about 2.5 body widths from the keeper he faces (e.g. while a choice is
+  // shown): the keeper backs onto his line, then the shooter takes a touch away.
+  async holdGap(A) {
+    const K = A && this.keeper(other(A.side));
+    if (!K) return;
+    const top = A.side === 'you';
+    const gy = this.pitch.goalMouth(top)[1];
+    const inward = top ? 1 : -1;
+    // the two sprites (and the name under the carrier) read as stacked when they are
+    // less than ~0.75 sizes apart across and ~1.7 sizes apart in depth
+    const overlaps = () => Math.abs(A.x - K.x) < this.size * 0.75 && Math.abs(A.y - K.y) < this.size * 1.7;
+    const unlock = this.lock(A, K);
+    try {
+      await this.keepGap([A.x, A.y], K, gy, inward, this.carrier === A ? A : null);
+      if (overlaps()) {
+        const lineY = gy + inward * 4;
+        if (Math.abs(K.y - lineY) > 1) await this.runTo(K, K.x, lineY, { dur: 0.22, free: true, endPose: 'ready' });
+        if (overlaps() && this.carrier === A) {
+          // a touch to the side (toward the middle if he is near a post): a clear angle on goal
+          const [gx] = this.pitch.goalMouth(top);
+          let dir = sgn(A.x - K.x, sgn(gx - A.x, 1));
+          if (Math.abs(K.x + dir * this.size * 0.85 - gx) > this.pitch.goalW * 0.75) dir = -dir;
+          await this.runTo(A, K.x + dir * this.size * 0.85, A.y, { dur: 0.25 });
+        }
+      }
+    } finally { unlock(); }
+  }
+
   // Choose the aim (and the keeper's movement) for a result before the ball is struck.
   // Every non-save path clears the keeper's body, arms and head (where he is and where
   // he goes) by at least a ball's width; saves land in the gloves.
@@ -885,33 +932,34 @@ export class MatchView {
     return best;
   }
 
-  // Everyone within about a body width of the shot path (except the keeper and the
-  // excluded) sidesteps off it before the strike.
-  async clearLane(S, E, exclude = []) {
-    const need = this.size * 0.42 + this.size * 0.13;
+  // Before the strike, every outfield player (crosser included, shooter excluded) whose
+  // drawn sprite (feet to head) comes within LANE_GAP of the drawn ball path, or who
+  // stands within KEEPER_GAP of the keeper, steps to the nearest spot that is clear of
+  // both. `path` is the ball's drawn screen path ([x, y - h] points) for the whole flight.
+  async clearLane(path, exclude = [], K = null, kPath = null) {
+    const need = this.size * LANE_GAP, kNeed = this.size * KEEPER_GAP;
+    const kPts = kPath && kPath.length ? kPath : K ? [[K.x, K.y]] : [];
+    const body = (x, y) => [[x, y], [x, y - this.size * 0.95]];
+    const gapTo = (x, y) => { const [f, h] = body(x, y); let g = 1e9; for (const p of path) g = Math.min(g, distSeg(p, f, h)); return g; };
+    const ok = (x, y) => gapTo(x, y) >= need && kPts.every(([kx, ky]) => Math.hypot(x - kx, y - ky) >= kNeed)
+      && x > this.pitch.x0 + 6 && x < this.pitch.x1 - 6 && y > this.pitch.y0 + 4 && y < this.pitch.y1 - 4;
     const jobs = [];
     for (const a of this.actors) {
       if (exclude.includes(a) || isGK(a) || a.alpha < 0.5 || a.leaving) continue;
-      const pts = [0, 0.45, 0.9].map((k) => [a.x, a.y - this.size * k]);
-      const K = exclude.find(isGK);
-      if (K && Math.abs(a.x - K.x) < this.size * 0.75 && Math.abs(a.y - K.y) < this.size * 0.9) {
-        // standing on the keeper: step aside so he can be seen
-        const dirK = sgn(a.x - K.x, sgn(a.x - lerp(S[0], E[0], 0.5), 1));
-        jobs.push(this.runTo(a, clamp(K.x + dirK * this.size * 0.95, this.pitch.x0 + 6, this.pitch.x1 - 6), a.y, { dur: 0.2, face: dirK, free: true }));
-        continue;
+      if (ok(a.x, a.y)) continue;
+      // nearest clear spot: sideways first, then also back toward the pitch
+      const away = K ? sgn(a.y - K.y, 1) : 1;
+      let best = null;
+      for (const dy of [0, 0.3, 0.6, 0.9]) for (let i = 1; i <= 60; i++) {
+        for (const sx of [-1, 1]) {
+          const x = a.x + sx * i * 2, y = a.y + away * dy * this.size;
+          if (!ok(x, y)) continue;
+          const cost = Math.hypot(x - a.x, y - a.y);
+          if (!best || cost < best.cost) best = { x, y, cost };
+        }
+        if (best && best.cost < i * 2) break;
       }
-      if (Math.min(...pts.map((p) => distSeg(p, S, E))) >= need) continue;
-      // shift sideways, away from the line, until every body point clears it
-      const lx = (y) => { const t = clamp((y - S[1]) / ((E[1] - S[1]) || 1), 0, 1); return lerp(S[0], E[0], t); };
-      let dir = sgn(a.x - lx(a.y), Math.random() < 0.5 ? -1 : 1);
-      const target = (d) => {
-        let x = a.x;
-        for (let i = 0; i < 40 && Math.min(...pts.map((p) => distSeg([x, p[1]], S, E))) < need + 2; i++) x += d * 2;
-        return x;
-      };
-      let tx = target(dir);
-      if (tx < this.pitch.x0 + 6 || tx > this.pitch.x1 - 6) { dir = -dir; tx = target(dir); }
-      jobs.push(this.runTo(a, tx, a.y, { dur: rand(0.15, 0.25), face: dir, free: true }));
+      if (best) jobs.push(this.runTo(a, best.x, best.y, { dur: clamp(best.cost / this.RUN, 0.15, 0.3), face: sgn(best.x - a.x, a.facing), free: true }));
     }
     await Promise.all(jobs);
   }
@@ -967,13 +1015,17 @@ export class MatchView {
     const Tfull = clamp(dist(S, [tx, gy]) / this.SHOT, 0.22, 0.6);
     if (leg) {
       // he commits the other way from where he stands; the ball hits his feet
-      const d = sgn(tx - K.x, Math.random() < 0.5 ? -1 : 1);
+      // he dives away from the shooter's side (his body lies on the far side), so the ball
+      // comes in to the trailing boot on the near side without crossing him
+      const d = sgn(S[0] - K.x, Math.random() < 0.5 ? -1 : 1);
       const f0 = this.lineAt(S, gx, gy, K.y)[2];
-      const txL = S[0] + (K.x + d * this.size * 0.12 - S[0]) / f0;
+      const txL = S[0] + (K.x + d * this.size * 0.2 - S[0]) / f0;
       P = this.lineAt(S, txL, gy, K.y);
       Tp = Math.max(0.24, Tfull * P[2]);
-      kp = { type: 'dive', K0: [K.x, K.y], B: [K.x, K.y], kf: d, r: Math.min(0.06, Tp * 0.2), T: Tp, layStart: 0.15 };
-      gh = 2 * this.s;
+      // he goes at once and is down by 30% of the flight, so the column above his boots
+      // is empty when the ball arrives; it meets the boot on the open side, low
+      kp = { type: 'dive', K0: [K.x, K.y], B: [K.x, K.y], kf: d, r: 0, T: Tp * 0.3, layStart: 0 };
+      gh = 6 * this.s; // boot height when he is down
     } else {
       const g = diveGloves(K.c);
       P = this.lineAt(S, tx, gy, K.y);
